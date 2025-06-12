@@ -1,0 +1,8 @@
+PyQt5==5.15.9
+moviepy==1.0.3
+pydub==0.25.1
+audiotsm==0.1.2
+websocket-client==1.6.1
+requests==2.31.0
+numpy==1.24.3
+opencv-python==4.8.0.74

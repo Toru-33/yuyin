@@ -1,0 +1,115 @@
+# coding=gbk
+import json
+import os
+
+import voice_get_text
+import datetime
+def run(video_path, save_path):
+    video_path = video_path.replace("\\",'/')
+    print("开始处理...请等待")
+    api = voice_get_text.RequestApi(appid="dece0a1f", secret_key="5c48172c37e755de387fd067d15f2505",
+                                 upload_file_path=video_path)
+    myresult=api.all_api_request()
+    def get_format_time(time_long):
+        def format_number(num):
+            if len(str(num))>1:
+                return str(num)
+            else:
+                return "0"+str(num)
+        myhour=0
+        mysecond=int(time_long/1000)
+        myminute=0
+        mymilsec=0
+        if mysecond<1:
+            return "00:00:00,%s"%(time_long)
+        else:
+            if mysecond>60:
+                myminute=int(mysecond/60)
+                if myminute>60:
+                    myhour=int(myminute/60)
+                    myminute=myminute-myhour*60
+                    mysecond=mysecond-myhour*3600-myminute*60
+                    mymilsec=time_long-1000*(mysecond+myhour*3600+myminute*60)
+                    return "%s:%s:%s,%s"%(format_number(myhour),format_number(myminute),format_number(mysecond),\
+                                          format_number(mymilsec))
+                else:
+                    mysecond=int(mysecond-myminute*60)
+                    mymilsec=time_long-1000*(mysecond+myminute*60)
+                    return "00:%s:%s,%s"%(format_number(myminute),format_number(mysecond),format_number(mymilsec))
+            else:
+                mymilsec=time_long-mysecond*1000
+                return "00:00:%s,%s"%(mysecond,mymilsec)
+    # print(myresult['data'][0])
+    # print(type(myresult))
+    # print(213)
+
+    data_list = json.loads(myresult['data'])
+    # print(type(data_list))
+    # print(data_list)
+    for item in data_list:
+        item['onebest'] = item['onebest'].replace(',', '，')
+    for d in data_list:
+        for key, value in d.items():
+            if isinstance(value, str):
+                d[key] = value.strip()
+        # print(data_list[0]['onebest'])
+    myresult_str=str(data_list)
+    myresult_sp=myresult_str.split("}, ")
+    # print(myresult_sp)
+    # print('st')
+    # print(myresult_sp[0])
+    # print('st')
+    myresult_sp[0] = myresult_sp[0].replace("[",'')
+    # myresult_sp[0] = myresult_sp[0].replace("{",'')
+    myresult_sp[-1] = myresult_sp[-1].replace("]",'')
+    myresult_sp[-1] = myresult_sp[-1].replace("}",'')
+    # myresult_sp=myresult_sp[1:-1]
+    # print(type(myresult_sp))
+    myword=""
+    flag_num=0
+    # print(myresult)
+    # print(777)
+    # print(myresult_str)
+    # print(type(myresult_str))
+    # print(888)
+    # print(myresult_sp)
+    # print(type(myresult_sp))
+    # print(999)
+    for i in myresult_sp:
+        # print(000)
+        flag_num+=1
+        # print(i)
+        word=[]
+        key=[]
+        a=i.split(",")
+        for j in a:
+            temp=j.split(":")
+            # print(temp)
+            key.append(temp[0][2:-1])
+            # print(111)
+            # print(key)
+            # print(222)
+            word.append(temp[1][2:-1])
+            # print(word)
+        get_dic=dict(zip(key,word))
+        # print(get_dic)
+        bg= get_format_time(int(get_dic["bg"]))
+        ed= get_format_time(int(get_dic["ed"]))
+        real_word=get_dic["onebest"]
+        newword=str(flag_num)+"\n"+bg+" --> "+ed+'\n'+real_word+"\n\n\n"
+        myword=myword+newword
+    print(myword)
+    # myword=video_path.split("/")[-1]+"\n"+myword
+    nowTime_str = datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H-%M-%S')
+    filename = 'subtitle.srt'
+    path_file = os.path.join(save_path, filename)
+    # path_file=r".\%s.srt"%(nowTime_str)
+    f = open(path_file,'w')
+    #覆盖原来的srt文件内容
+    # f.truncate()
+    f.write(myword)
+    f.close()
+    # f.write(myword)
+    # f.write('\n')
+    # f.close()
+    print('已经识别完成，见输出目录下的srt文件')
