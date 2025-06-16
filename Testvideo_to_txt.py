@@ -1,10 +1,14 @@
 # coding=gbk
+import json
 import voice_get_text
 import datetime
-video_path=input("音频路径：").replace("\\",'/')
-print("开始处理...请等待")
-api = voice_get_text.RequestApi(appid="dece0a1f", secret_key="5c48172c37e755de387fd067d15f2505",
-                             upload_file_path=video_path)
+video_path=input("锟斤拷频路锟斤拷锟斤拷").replace("\\",'/')
+print("锟斤拷始锟斤拷锟斤拷...锟斤拷却锟�")
+api = voice_get_text.RequestApi(
+    appid="璇锋浛鎹负鎮ㄧ殑APPID",  # 浠庣澶ц椋炴帶鍒跺彴鑾峰彇
+    secret_key="璇锋浛鎹负鎮ㄧ殑Secret_Key",  # 浠庣澶ц椋炴帶鍒跺彴鑾峰彇
+    upload_file_path=video_path
+)
 myresult=api.all_api_request()
 def get_format_time(time_long):
     def format_number(num):
@@ -65,5 +69,5 @@ f = open(path_file,'a')
 f.write(myword)
 f.write('\n')
 f.close()
-print('已经识别完成，见输出目录下的srt文件')
+print('锟窖撅拷识锟斤拷锟斤拷桑锟斤拷锟斤拷锟斤拷目录锟铰碉拷srt锟侥硷拷')
 input()

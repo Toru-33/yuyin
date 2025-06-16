@@ -32,7 +32,7 @@ STATUS_LAST_FRAME = 2  # 最后一帧的标识
 
 class Ws_Param(object):
     # 初始化
-    def __init__(self, APPID, APIKey, APISecret, Text):
+    def __init__(self, APPID, APIKey, APISecret, Text, voice_type="aisxping", speed=50, volume=50):
         self.APPID = APPID
         self.APIKey = APIKey
         self.APISecret = APISecret
@@ -41,9 +41,16 @@ class Ws_Param(object):
         # 公共参数(common)
         self.CommonArgs = {"app_id": self.APPID}
         # 业务参数(business)，更多个性化参数可在官网查看
-        self.BusinessArgs = {"aue": "lame", "auf": "audio/L16;rate=16000", "vcn": "aisxping", "tte": "utf8"}
+        self.BusinessArgs = {
+            "aue": "lame", 
+            "auf": "audio/L16;rate=16000", 
+            "vcn": voice_type,  # 发音人
+            "speed": speed,     # 语速(0-100)
+            "volume": volume,   # 音量(0-100)
+            "tte": "utf8"
+        }
         self.Data = {"status": 2, "text": str(base64.b64encode(self.Text.encode('utf-8')), "UTF8")}
-        #使用小语种须使用以下方式，此处的unicode指的是 utf16小端的编码方式，即"UTF-16LE"”
+        #使用小语种须使用以下方式，此处的unicode指的是 utf16小端的编码方式，即"UTF-16LE"
         #self.Data = {"status": 2, "text": str(base64.b64encode(self.Text.encode('utf-16')), "UTF8")}
 
     # 生成url
@@ -184,72 +191,79 @@ def speed_change(audio_path, start_time, end_time, i):
     return wsola
 
 
-def run(video_file, subtitle_file):
+def run(video_file, subtitle_file, output_path, voice_type="xiaoyan", speed=100, volume=80):
 
     # 创建一个空列表，用于存储每个段落的文本和开始时间
     segments = []
 
-    # 读取字幕文件
-    with open(subtitle_file, 'r', encoding='gbk') as f:
-        lines = f.readlines()
+    # 读取字幕文件 - 支持多种编码
+    subtitle_content = ""
+    for encoding in ['utf-8', 'gbk', 'windows-1252']:
+        try:
+            with open(subtitle_file, 'r', encoding=encoding) as f:
+                subtitle_content = f.read()
+            print(f"成功使用 {encoding} 编码读取字幕文件")
+            break
+        except UnicodeDecodeError:
+            continue
+    
+    if not subtitle_content:
+        raise Exception("无法读取字幕文件，尝试了多种编码格式")
+    
+    lines = subtitle_content.strip().split('\n')
 
     # 解析字幕文件
-    for i in range(0, len(lines)-1, 5):
-        # print(len(lines))
-        print(i)
-        # if lines[i+1] == "\n":
-        #     print(1)
-        #     break
-        # print(lines[i+1])
-        soundTime = lines[i + 1].strip()
-        print(soundTime)
-        text = lines[i + 2].strip()
-        print(text)
-        # print(start_time)
-        # print(111)
-        # print(end_time)
-        # print(222)
-        # print(text)
-        # 提取开始时间和结束时间的时间戳
-        # start_time_match = re.search(r'(\d{2}):(\d{2}):(\d{2}),(\d{3})', start_time)
-        # print(start_time_match)
-        # print(111)
-        # end_time_match = re.search(r'(\d{2}):(\d{2}):(\d{2}),(\d{3})', end_time)
+    for i in range(0, len(lines)-1, 4):  # 修正步长，SRT格式通常是4行一组
+        if i + 2 >= len(lines):
+            break
+            
+        try:
+            soundTime = lines[i + 1].strip()
+            text = lines[i + 2].strip()
+            
+            if not soundTime or not text or '-->' not in soundTime:
+                continue
+                
+            print(f"处理字幕 {i//4 + 1}: {text}")
 
-        # 以 "-->" 作为分界线，将数据分割成起始时间和结束时间
-        time_parts = soundTime.split(" --> ")
-        # print(time_parts[0])
-        # 定义起始时间和结束时间的正则表达式模式
-        time_pattern = r'(\d{2}):(\d{2}):(\d{1,2}),(\d{1,3})'
+            # 以 "-->" 作为分界线，将数据分割成起始时间和结束时间
+            time_parts = soundTime.split(" --> ")
+            
+            # 定义起始时间和结束时间的正则表达式模式
+            time_pattern = r'(\d{2}):(\d{2}):(\d{1,2}),(\d{1,3})'
 
-        # 分别匹配起始时间和结束时间
-        start_time_match = re.search(time_pattern, time_parts[0])
-        end_time_match = re.search(time_pattern, time_parts[1])
-        print(start_time_match)
-        print(end_time_match)
-        if start_time_match and end_time_match:
-            start_time_hours = int(start_time_match.group(1))
-            start_time_minutes = int(start_time_match.group(2))
-            start_time_seconds = int(start_time_match.group(3))
-            start_time_milliseconds = int(start_time_match.group(4))
+            # 分别匹配起始时间和结束时间
+            start_time_match = re.search(time_pattern, time_parts[0])
+            end_time_match = re.search(time_pattern, time_parts[1])
+            
+            if start_time_match and end_time_match:
+                start_time_hours = int(start_time_match.group(1))
+                start_time_minutes = int(start_time_match.group(2))
+                start_time_seconds = int(start_time_match.group(3))
+                start_time_milliseconds = int(start_time_match.group(4))
 
-            end_time_hours = int(end_time_match.group(1))
-            end_time_minutes = int(end_time_match.group(2))
-            end_time_seconds = int(end_time_match.group(3))
-            end_time_milliseconds = int(end_time_match.group(4))
+                end_time_hours = int(end_time_match.group(1))
+                end_time_minutes = int(end_time_match.group(2))
+                end_time_seconds = int(end_time_match.group(3))
+                end_time_milliseconds = int(end_time_match.group(4))
 
-            # 计算开始时间和结束时间的时间戳
-            start_time_timestamp = start_time_hours * 3600 + start_time_minutes * 60 + start_time_seconds + start_time_milliseconds / 1000
-            end_time_timestamp = end_time_hours * 3600 + end_time_minutes * 60 + end_time_seconds + end_time_milliseconds / 1000
+                # 计算开始时间和结束时间的时间戳
+                start_time_timestamp = start_time_hours * 3600 + start_time_minutes * 60 + start_time_seconds + start_time_milliseconds / 1000
+                end_time_timestamp = end_time_hours * 3600 + end_time_minutes * 60 + end_time_seconds + end_time_milliseconds / 1000
 
-            # 添加到segments列表中
-            segments.append((text, start_time_timestamp, end_time_timestamp))
-    print("segments:", segments)
+                # 添加到segments列表中
+                segments.append((text, start_time_timestamp, end_time_timestamp))
+        except Exception as e:
+            print(f"解析字幕行 {i} 时出错: {e}")
+            continue
+            
+    print(f"成功解析 {len(segments)} 个字幕片段")
 
     index = 0
     merged_audio = AudioSegment.empty()
     tmpname = 'audio_segment_'
     changeSpeedTmpname = 'output_speed_cn'
+    
     for i, (text, start_time, end_time) in enumerate(segments):
         if i == 0 and start_time != 0:
             silence_duration = start_time * 1000
@@ -276,7 +290,7 @@ def run(video_file, subtitle_file):
         global wsParam
         wsParam = Ws_Param(APPID='dece0a1f', APISecret='Y2I4YTUxMDljZjk2YzAwZGMzNTgwYTNl',
                            APIKey='5cc4877fa4b7d173d8f1c085e50a4788',
-                           Text=text)
+                           Text=text, voice_type=voice_type, speed=speed//2, volume=volume)
         websocket.enableTrace(False)
         wsUrl = wsParam.create_url()
         ws = websocket.WebSocketApp(wsUrl, on_message=on_message, on_error=on_error, on_close=on_close)
@@ -293,18 +307,48 @@ def run(video_file, subtitle_file):
         # time.sleep(end_time - start_time)
         merged_audio += audio_data
         print(f"Segment {i} completed")
+    
     merged_audio.export(f"./newOutputCn.wav", format="wav")
 
-    output_dir = os.path.dirname(subtitle_file)
-    output_path = os.path.join(output_dir, "NewVideo.mp4")
+    # 确定最终输出路径
+    if output_path and output_path.endswith('.mp4'):
+        final_output_path = output_path.replace("\\", "/")
+    else:
+        # 如果没有指定输出路径，使用默认命名
+        output_dir = os.path.dirname(subtitle_file)
+        base_name = os.path.splitext(os.path.basename(video_file))[0]
+        final_output_path = os.path.join(output_dir, f"{base_name}_cn_to_cn.mp4").replace("\\", "/")
 
+    print(f"开始合并视频和音频，输出到: {final_output_path}")
 
     # 删除所有语音片段
     for i in range(len(segments)):
-        os.remove(f'audio_segment_{i}.wav')
-        os.remove(f'output_speed_cn{i}.wav')
-
+        try:
+            os.remove(f'audio_segment_{i}.wav')
+            os.remove(f'output_speed_cn{i}.wav')
+        except FileNotFoundError:
+            pass
 
     # 合并视频和音频
-    subprocess.run(['ffmpeg', '-i', video_file, '-i', 'newOutputCn.wav', '-c', 'copy', output_path])
+    try:
+        subprocess.run(['ffmpeg', '-y', '-i', video_file, '-i', 'newOutputCn.wav', '-c', 'copy', final_output_path],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+        print(f"视频合成成功: {final_output_path}")
+        
+        # 清理临时音频文件
+        try:
+            os.remove('newOutputCn.wav')
+            if os.path.exists('demo.mp3'):
+                os.remove('demo.mp3')
+        except FileNotFoundError:
+            pass
+            
+        return final_output_path
+        
+    except subprocess.CalledProcessError as e:
+        print(f"视频合成失败: {e}")
+        raise Exception(f"视频合成失败: {e}")
+    except Exception as e:
+        print(f"合成过程中出现错误: {e}")
+        raise
 
