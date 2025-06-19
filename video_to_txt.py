@@ -4,70 +4,85 @@ import os
 import voice_get_text
 import datetime
 
-def run(video_path, save_path, output_filename=None):
+def load_api_config():
+    """从config.json加载API配置"""
+    try:
+        if os.path.exists('config.json'):
+            with open('config.json', 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            appid = config.get('xunfei_appid', 'c9f38a98')
+            secret_key = config.get('xunfei_apisecret', 'a8b81c43d2528e7edcd6a826ec31ee19')
+            
+            return appid, secret_key
+        else:
+            return 'c9f38a98', 'a8b81c43d2528e7edcd6a826ec31ee19'
+            
+    except Exception as e:
+        print(f"❌ 加载API配置失败: {e}，使用默认配置")
+        return 'c9f38a98', 'a8b81c43d2528e7edcd6a826ec31ee19'
+
+def get_format_time(time_long):
+    """格式化时间戳"""
+    def format_number(num):
+        if len(str(num)) > 1:
+            return str(num)
+        else:
+            return "0" + str(num)
+    
+    myhour = 0
+    mysecond = int(time_long / 1000)
+    myminute = 0
+    mymilsec = 0
+    
+    if mysecond < 1:
+        return "00:00:00,%s" % (time_long)
+    else:
+        if mysecond > 60:
+            myminute = int(mysecond / 60)
+            if myminute > 60:
+                myhour = int(myminute / 60)
+                myminute = myminute - myhour * 60
+                mysecond = mysecond - myhour * 3600 - myminute * 60
+                mymilsec = time_long - 1000 * (mysecond + myhour * 3600 + myminute * 60)
+                return "%s:%s:%s,%s" % (format_number(myhour), format_number(myminute), 
+                                      format_number(mysecond), format_number(mymilsec))
+            else:
+                mysecond = int(mysecond - myminute * 60)
+                mymilsec = time_long - 1000 * (mysecond + myminute * 60)
+                return "00:%s:%s,%s" % (format_number(myminute), format_number(mysecond), 
+                                      format_number(mymilsec))
+        else:
+            mymilsec = time_long - mysecond * 1000
+            return "00:00:%s,%s" % (mysecond, mymilsec)
+
+def run(video_path, save_path='./', output_filename=None):
     """
-    语音识别主函数
+    语音识别主函数 - 优化版
+    支持多种音频/视频格式，生成高质量SRT字幕文件
     
     Args:
-        video_path: 音频文件路径
-        save_path: 保存目录路径
-        output_filename: 可选的输出文件名，如果不提供则自动生成
+        video_path: 音频/视频文件路径
+        save_path: 输出目录路径
+        output_filename: 自定义输出文件名（可选）
     
     Returns:
-        str: 字幕文件路径
+        生成的字幕文件路径
     """
     try:
-        video_path = video_path.replace("\\", '/')
-        save_path = save_path.replace("\\", '/')
+        # 从config.json加载API配置
+        appid, secret_key = load_api_config()
         
-        print("开始识别...请等待")
-        
-        # ⚠️ 重要：请将下面的appid和secret_key替换为您从科大讯飞控制台获取的语音转写服务密钥
-        # 1. 访问：https://www.xfyun.cn/ 登录账号
-        # 2. 进入控制台 → 我的应用 → 语音转写
-        # 3. 获取您的APPID和Secret Key
-        # 4. 确保已在 http://www.xfyun.cn/services/lfasr 领取了免费时长
+        # 创建API请求对象
         api = voice_get_text.RequestApi(
-            appid="c9f38a98",  # 从科大讯飞控制台获取
-            secret_key="a8b81c43d2528e7edcd6a826ec31ee19",  # 从科大讯飞控制台获取
+            appid=appid,
+            secret_key=secret_key,
             upload_file_path=video_path
         )
+        
+        print(f"🎙️ 开始语音识别: {video_path}")
         myresult = api.all_api_request()
         
-        def get_format_time(time_long):
-            """格式化时间戳"""
-            def format_number(num):
-                if len(str(num)) > 1:
-                    return str(num)
-                else:
-                    return "0" + str(num)
-            
-            myhour = 0
-            mysecond = int(time_long / 1000)
-            myminute = 0
-            mymilsec = 0
-            
-            if mysecond < 1:
-                return "00:00:00,%s" % (time_long)
-            else:
-                if mysecond > 60:
-                    myminute = int(mysecond / 60)
-                    if myminute > 60:
-                        myhour = int(myminute / 60)
-                        myminute = myminute - myhour * 60
-                        mysecond = mysecond - myhour * 3600 - myminute * 60
-                        mymilsec = time_long - 1000 * (mysecond + myhour * 3600 + myminute * 60)
-                        return "%s:%s:%s,%s" % (format_number(myhour), format_number(myminute), 
-                                              format_number(mysecond), format_number(mymilsec))
-                    else:
-                        mysecond = int(mysecond - myminute * 60)
-                        mymilsec = time_long - 1000 * (mysecond + myminute * 60)
-                        return "00:%s:%s,%s" % (format_number(myminute), format_number(mysecond), 
-                                          format_number(mymilsec))
-                else:
-                    mymilsec = time_long - mysecond * 1000
-                    return "00:00:%s,%s" % (mysecond, mymilsec)
-
         # 解析API返回的数据
         data_list = json.loads(myresult['data'])
         
@@ -107,9 +122,6 @@ def run(video_path, save_path, output_filename=None):
             except (KeyError, ValueError) as e:
                 print(f"处理字幕条目 {flag_num} 时出错: {e}")
                 continue
-
-        print("字幕内容预览:")
-        print(myword[:500] + "..." if len(myword) > 500 else myword)
         
         # 确保输出目录存在
         os.makedirs(save_path, exist_ok=True)
@@ -200,22 +212,16 @@ def merge_short_segments(data_list):
     if current_segment is not None:
         merged_segments.append(current_segment)
     
-    print(f"字幕合并完成: {len(data_list)} -> {len(merged_segments)} 个段落")
-    
-    # 显示合并后的前几个段落作为示例
-    for i, segment in enumerate(merged_segments[:3]):
-        print(f"段落 {i+1}: {segment['onebest'][:50]}...")
-    
     return merged_segments
 
+# 测试代码
 if __name__ == "__main__":
-    # 测试代码
+    # 测试用例
     test_audio = "test_audio.wav"
-    test_output = "./output"
     
     if os.path.exists(test_audio):
         try:
-            result = run(test_audio, test_output)
+            result = run(test_audio, "./")
             print(f"测试成功: {result}")
         except Exception as e:
             print(f"测试失败: {e}")

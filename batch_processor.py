@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-批量处理模块 v3.1 (增强版)
+批量处理模块 v1.0 (增强版)
 支持批量处理多个视频文件
 - 新增智能转换功能
 - 支持语音参数配置
@@ -24,11 +24,15 @@ import addNewSound
 import addSrt
 import video_to_txt
 import voice_get_text
-import syntheticSpeech
-import syntheticSpeechCn
-import syntheticSpeechTranslateToEn
-import syntheticSpeechTranslateToCn
+# 移除冗余模块，统一使用 unified_speech_synthesis
+import unified_speech_synthesis
 import generateWav
+
+# 导入配置管理器
+
+import config_manager
+CONFIG_MANAGER_AVAILABLE = True
+
 
 # --- 增强滑块组件 (从enhanced_UI.py复制) ---
 class EnhancedSlider(QWidget):
@@ -128,13 +132,16 @@ class BatchProcessThread(QThread):
     current_file = pyqtSignal(str)
     file_completed = pyqtSignal(str, bool, str)
     all_completed = pyqtSignal()
+    subtitle_generated = pyqtSignal(str, str, str)  # (file_path, subtitle_type, content)
+    step_progress = pyqtSignal(str, str)  # (step_name, detail_message)
     
-    def __init__(self, file_list, output_dir, file_configs=None, global_config=None):
+    def __init__(self, file_list, output_dir, file_configs=None, global_config=None, concurrent_count=1):
         super().__init__()
         self.file_list = file_list
         self.output_dir = output_dir
         self.file_configs = file_configs or {}  # 单独配置字典
         self.global_config = global_config  # 统一配置
+        self.concurrent_count = max(1, min(4, concurrent_count))  # 限制在1-4之间
         self.is_running = True
         
     def detectLanguage(self, text):
@@ -156,54 +163,115 @@ class BatchProcessThread(QThread):
         try:
             total_files = len(self.file_list)
             completed_files = 0
-        
-            for i, video_file in enumerate(self.file_list):
-                if not self.is_running:
-                    break
-                
-                # 获取该文件的配置
-                if video_file in self.file_configs:
-                    config = self.file_configs[video_file]
-                    conversion_type = config['conversion_type']
-                    voice_params = {
-                        'voice_type': config['voice_type'],
-                        'speed': config['speed'],
-                        'volume': config['volume'],
-                        'quality': config['quality']
-                    }
-                else:
-                    # 使用全局配置
-                    conversion_type = self.global_config['conversion_type']
-                    voice_params = {
-                        'voice_type': self.global_config['voice_type'],
-                        'speed': self.global_config['speed'],
-                        'volume': self.global_config['volume'],
-                        'quality': self.global_config['quality']
-                    }
-                
-                self.current_file.emit(f"正在处理: {os.path.basename(video_file)} ({conversion_type})")
-                
-                try:
-                    success, message = self.process_single_file(video_file, self.output_dir, conversion_type, voice_params)
-                    self.file_completed.emit(video_file, success, message)
+            
+            if self.concurrent_count == 1:
+                # 单线程处理
+                for i, video_file in enumerate(self.file_list):
+                    if not self.is_running:
+                        break
                     
+                    success, message = self._process_file_with_config(video_file, i, total_files)
                     if success:
                         completed_files += 1
+                    
+                    # 更新总进度
+                    progress = int((i + 1) / total_files * 100)
+                    self.progress.emit(progress)
+            else:
+                # 多线程并发处理
+                import concurrent.futures
+                import queue
                 
-                except Exception as e:
-                    error_msg = f"处理文件时发生错误: {str(e)}"
-                    self.file_completed.emit(video_file, False, error_msg)
+                # 创建进度队列
+                progress_queue = queue.Queue()
+                completed_count = 0
+                
+                # 工作函数，包含进度报告
+                def worker(video_file, index):
+                    try:
+                        success, message = self._process_file_with_config(video_file, index, total_files)
+                        progress_queue.put(('completed', video_file, success, message, index))
+                        return success, message
+                    except Exception as e:
+                        error_msg = f"处理文件时发生错误: {str(e)}"
+                        progress_queue.put(('completed', video_file, False, error_msg, index))
+                        return False, error_msg
+                
+                # 使用线程池执行并发处理
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.concurrent_count) as executor:
+                    # 提交所有任务
+                    future_to_file = {
+                        executor.submit(worker, video_file, i): (video_file, i)
+                        for i, video_file in enumerate(self.file_list)
+                    }
+                    
+                    # 监控进度
+                    while completed_count < total_files and self.is_running:
+                        try:
+                            # 检查队列中的完成通知
+                            while not progress_queue.empty():
+                                event_type, video_file, success, message, index = progress_queue.get_nowait()
+                                if event_type == 'completed':
+                                    self.file_completed.emit(video_file, success, message)
+                                    completed_count += 1
+                                    if success:
+                                        completed_files += 1
+                                    
+                                    # 更新总进度
+                                    progress = int(completed_count / total_files * 100)
+                                    self.progress.emit(progress)
+                            
+                            # 短暂休眠避免CPU过度占用
+                            self.msleep(100)
+                            
+                        except queue.Empty:
+                            pass
+                    
+                    # 如果被停止，取消所有未完成的任务
+                    if not self.is_running:
+                        for future in future_to_file.keys():
+                            future.cancel()
             
-                # 更新总进度
-                progress = int((i + 1) / total_files * 100)
-                self.progress.emit(progress)
-        
+            print(f"批处理完成: {completed_files}/{total_files} 个文件成功处理")
             self.all_completed.emit()
-    
+        
         except Exception as e:
             print(f"批处理线程错误: {e}")
-            import traceback
             traceback.print_exc()
+    
+    def _process_file_with_config(self, video_file, index, total_files):
+        """处理单个文件，包含配置获取逻辑"""
+        if not self.is_running:
+            return False, "处理已停止"
+        
+        # 获取该文件的配置
+        if video_file in self.file_configs:
+            config = self.file_configs[video_file]
+            conversion_type = config['conversion_type']
+            voice_params = {
+                'voice_type': config['voice_type'],
+                'speed': config['speed'],
+                'volume': config['volume'],
+                'quality': config['quality']
+            }
+        else:
+            # 使用全局配置
+            conversion_type = self.global_config['conversion_type']
+            voice_params = {
+                'voice_type': self.global_config['voice_type'],
+                'speed': self.global_config['speed'],
+                'volume': self.global_config['volume'],
+                'quality': self.global_config['quality']
+            }
+        
+        self.current_file.emit(f"正在处理: {os.path.basename(video_file)} ({conversion_type}) [{index+1}/{total_files}]")
+        
+        try:
+            success, message = self.process_single_file(video_file, self.output_dir, conversion_type, voice_params)
+            return success, message
+        except Exception as e:
+            error_msg = f"处理文件时发生错误: {str(e)}"
+            return False, error_msg
 
     def process_single_file(self, video_file, output_dir, conversion_type, voice_params):
         """处理单个文件，支持单独配置"""
@@ -211,6 +279,7 @@ class BatchProcessThread(QThread):
             if not self.is_running:
                 return False, "处理已停止"
             
+            file_name = os.path.basename(video_file)
             print(f"开始处理文件: {video_file}")
             print(f"转换类型: {conversion_type}")
             print(f"语音参数: {voice_params}")
@@ -221,26 +290,48 @@ class BatchProcessThread(QThread):
             os.makedirs(file_output_dir, exist_ok=True)
             
             # 1. 提取音频
+            self.step_progress.emit("步骤 1/5", f"正在提取音频: {file_name}")
             import generateWav
-            wav_path = generateWav.run(video_file, file_output_dir)
-            if not os.path.exists(wav_path):
-                return False, "音频提取失败"
+            
+            # 生成带有文件名的音频文件名
+            import re
+            clean_name = re.sub(r'[^\w\-_]', '_', base_name)
+            audio_filename = f'{clean_name}_extractedAudio.wav'
+            
+            wav_path = generateWav.run(video_file, file_output_dir, audio_filename)
+            if not wav_path or not os.path.exists(wav_path):
+                return False, "音频提取失败 - 请检查视频文件是否包含音频轨道"
             
             # 2. 生成无声视频
+            self.step_progress.emit("步骤 2/5", f"正在生成无声视频: {file_name}")
             import addNewSound
-            video_without_sound = addNewSound.del_audio(video_file, file_output_dir)
-            if not os.path.exists(video_without_sound):
-                return False, "无声视频生成失败"
+            
+            video_filename = f'{clean_name}_videoWithoutAudio.mp4'
+            video_without_sound = addNewSound.del_audio(video_file, file_output_dir, video_filename)
+            if not video_without_sound or not os.path.exists(video_without_sound):
+                return False, "无声视频生成失败 - 请检查视频文件格式"
             
             # 3. 语音识别
+            self.step_progress.emit("步骤 3/5", f"正在识别语音，需要较长时间...")
             import video_to_txt
-            video_to_txt.run(wav_path, file_output_dir)
             
-            subtitle_file = os.path.join(file_output_dir, "subtitle.srt")
-            if not os.path.exists(subtitle_file):
-                return False, "语音识别失败"
+            subtitle_filename = f'{clean_name}_subtitle.srt'
+            subtitle_file = video_to_txt.run(wav_path, file_output_dir, subtitle_filename)
             
-            # 智能转换逻辑
+            if not subtitle_file or not os.path.exists(subtitle_file):
+                return False, "语音识别失败 - 请检查API配置或音频质量"
+            
+            # 读取并发送原始字幕
+            try:
+                with open(subtitle_file, 'r', encoding='utf-8') as f:
+                    subtitle_content = f.read()
+                self.subtitle_generated.emit(video_file, "original", subtitle_content)
+                print(f"已发送原始字幕: {len(subtitle_content)} 字符")
+            except Exception as e:
+                print(f"读取字幕文件失败: {e}")
+            
+            # 4. 智能转换逻辑
+            self.step_progress.emit("步骤 4/5", f"正在分析语言并准备转换: {conversion_type}")
             actual_conversion_type = conversion_type
             if conversion_type == "智能转换":
                 # 检测语言
@@ -254,8 +345,11 @@ class BatchProcessThread(QThread):
                     actual_conversion_type = "英文转中文"
                 else:
                     actual_conversion_type = "英文转中文"  # 默认
+                
+                self.step_progress.emit("步骤 4/5", f"智能检测为: {detected_lang} -> {actual_conversion_type}")
             
-            # 4. 语音合成
+            # 5. 语音合成
+            self.step_progress.emit("步骤 5/5", f"正在进行语音合成: {actual_conversion_type}")
             type_map = {
                 "智能转换": "smart",
                 "中文转英文": "cn_to_en", 
@@ -273,31 +367,33 @@ class BatchProcessThread(QThread):
             speed = voice_params.get('speed', 100)
             volume = voice_params.get('volume', 80)
             
-            # 根据转换类型调用相应的合成函数
+            print(f"使用语音参数: 发音人={voice_type}, 语速={speed}%, 音量={volume}%")
+            
+            # 使用统一语音合成模块
             generated_video_path = None
             try:
-                if actual_conversion_type == "中文转英文":
-                    import syntheticSpeechTranslateToEn
-                    generated_video_path = syntheticSpeechTranslateToEn.run(
-                        video_without_sound, subtitle_file, final_video_path, voice_type, speed, volume
-                    )
-                elif actual_conversion_type == "中文转中文":
-                    import syntheticSpeechCn
-                    generated_video_path = syntheticSpeechCn.run(
-                        video_without_sound, subtitle_file, final_video_path, voice_type, speed, volume
-                    )
-                elif actual_conversion_type == "英文转中文":
-                    import syntheticSpeechTranslateToCn
-                    generated_video_path = syntheticSpeechTranslateToCn.run(
-                        video_without_sound, subtitle_file, final_video_path, voice_type, speed, volume
-                    )
-                elif actual_conversion_type == "英文转英文":
-                    import syntheticSpeech
-                    generated_video_path = syntheticSpeech.run(
-                        video_without_sound, subtitle_file, final_video_path, voice_type, speed, volume
-                    )
+                from unified_speech_synthesis import UnifiedSpeechSynthesis
+                
+                synthesis = UnifiedSpeechSynthesis()
+                
+                def progress_callback(progress, message):
+                    self.step_progress.emit("步骤 5/5", f"{message} ({progress}%)")
+                
+                generated_video_path = synthesis.process_video(
+                    video_file=video_file,
+                    video_without_audio=video_without_sound,
+                    subtitle_file=subtitle_file,
+                    output_path=final_video_path,
+                    conversion_type=actual_conversion_type,
+                    voice_type=voice_type,
+                    speed=speed,
+                    volume=volume,
+                    progress_callback=progress_callback
+                )
             except Exception as e:
-                return False, f"语音合成失败: {str(e)}"
+                error_msg = f"语音合成失败: {str(e)}"
+                self.step_progress.emit("错误", error_msg)
+                return False, error_msg
             
             # 验证输出文件
             final_output = generated_video_path if generated_video_path and os.path.exists(generated_video_path) else final_video_path
@@ -306,6 +402,28 @@ class BatchProcessThread(QThread):
                 file_size = os.path.getsize(final_output) / (1024 * 1024)
                 success_msg = f"处理成功 ({actual_conversion_type}) - {file_size:.1f}MB"
                 print(f"✅ {success_msg}: {final_output}")
+                
+                # 尝试发送处理后的字幕（如果有的话）
+                try:
+                    # 查找可能生成的转换后字幕文件
+                    subtitle_patterns = [
+                        os.path.join(file_output_dir, f"{clean_name}_translated.srt"),
+                        os.path.join(file_output_dir, f"{clean_name}_processed.srt"),
+                        os.path.join(file_output_dir, "translated.srt"),
+                        os.path.join(file_output_dir, "processed.srt")
+                    ]
+                    
+                    for processed_subtitle_file in subtitle_patterns:
+                        if os.path.exists(processed_subtitle_file):
+                            with open(processed_subtitle_file, 'r', encoding='utf-8') as f:
+                                processed_subtitle_content = f.read()
+                            self.subtitle_generated.emit(video_file, "translated", processed_subtitle_content)
+                            print(f"已发送转换后字幕: {len(processed_subtitle_content)} 字符")
+                            break
+                            
+                except Exception as e:
+                    print(f"读取转换后字幕失败: {e}")
+                
                 return True, success_msg
             else:
                 return False, f"输出文件未生成: {final_output}"
@@ -387,41 +505,41 @@ class BatchProcessDialog(QDialog):
         file_buttons_layout.setSpacing(8)  # 减小按钮间距
         file_buttons_layout.setContentsMargins(5, 5, 5, 5)  # 减小边距
         
-        add_files_btn = QPushButton("添加文件")
-        add_files_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
-        add_files_btn.clicked.connect(self.addFiles)
-        add_files_btn.setMinimumHeight(32)  # 减小按钮高度
-        add_files_btn.setMinimumWidth(70)  # 减小按钮宽度
+        self.add_files_btn = QPushButton("添加文件")
+        self.add_files_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        self.add_files_btn.clicked.connect(self.addFiles)
+        self.add_files_btn.setMinimumHeight(32)  # 减小按钮高度
+        self.add_files_btn.setMinimumWidth(70)  # 减小按钮宽度
         
-        add_folder_btn = QPushButton("添加文件夹")
-        add_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
-        add_folder_btn.clicked.connect(self.addFolder)
-        add_folder_btn.setMinimumHeight(32)  # 减小按钮高度
-        add_folder_btn.setMinimumWidth(80)  # 调整按钮宽度
+        self.add_folder_btn = QPushButton("添加文件夹")
+        self.add_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
+        self.add_folder_btn.clicked.connect(self.addFolder)
+        self.add_folder_btn.setMinimumHeight(32)  # 减小按钮高度
+        self.add_folder_btn.setMinimumWidth(80)  # 调整按钮宽度
         
-        remove_btn = QPushButton("移除选中")
-        remove_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
-        remove_btn.clicked.connect(self.removeSelected)
-        remove_btn.setMinimumHeight(32)  # 减小按钮高度
-        remove_btn.setMinimumWidth(70)  # 减小按钮宽度
+        self.remove_btn = QPushButton("移除选中")
+        self.remove_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        self.remove_btn.clicked.connect(self.removeSelected)
+        self.remove_btn.setMinimumHeight(32)  # 减小按钮高度
+        self.remove_btn.setMinimumWidth(70)  # 减小按钮宽度
         
-        clear_btn = QPushButton("清空列表")
-        clear_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton))
-        clear_btn.clicked.connect(self.clearList)
-        clear_btn.setMinimumHeight(32)  # 减小按钮高度
-        clear_btn.setMinimumWidth(70)  # 减小按钮宽度
+        self.clear_btn = QPushButton("清空列表")
+        self.clear_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton))
+        self.clear_btn.clicked.connect(self.clearList)
+        self.clear_btn.setMinimumHeight(32)  # 减小按钮高度
+        self.clear_btn.setMinimumWidth(70)  # 减小按钮宽度
         
-        view_config_btn = QPushButton("查看配置")
-        view_config_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
-        view_config_btn.clicked.connect(self.viewAllConfigurations)
-        view_config_btn.setMinimumHeight(32)  # 减小按钮高度
-        view_config_btn.setMinimumWidth(70)  # 减小按钮宽度
+        self.view_config_btn = QPushButton("查看配置")
+        self.view_config_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
+        self.view_config_btn.clicked.connect(self.viewAllConfigurations)
+        self.view_config_btn.setMinimumHeight(32)  # 减小按钮高度
+        self.view_config_btn.setMinimumWidth(70)  # 减小按钮宽度
         
-        file_buttons_layout.addWidget(add_files_btn)
-        file_buttons_layout.addWidget(add_folder_btn)
-        file_buttons_layout.addWidget(remove_btn)
-        file_buttons_layout.addWidget(clear_btn)
-        file_buttons_layout.addWidget(view_config_btn)
+        file_buttons_layout.addWidget(self.add_files_btn)
+        file_buttons_layout.addWidget(self.add_folder_btn)
+        file_buttons_layout.addWidget(self.remove_btn)
+        file_buttons_layout.addWidget(self.clear_btn)
+        file_buttons_layout.addWidget(self.view_config_btn)
         file_buttons_layout.addStretch()
         
         # 文件列表
@@ -736,10 +854,27 @@ class BatchProcessDialog(QDialog):
         self.voice_combo.addItems(voice_items)
         self.voice_combo.currentTextChanged.connect(self.onConfigChanged)
         
+        # 并发数量
+        concurrent_label = QLabel("并发数量:")
+        concurrent_label.setStyleSheet("font-weight: bold; color: #333;")
+        concurrent_label.setAlignment(Qt.AlignLeft)
+        self.concurrent_combo = QComboBox()
+        self.concurrent_combo.addItems([
+            "1个文件 (单线程，稳定，推荐)",
+            "2个文件 (双线程，平衡)",
+            "3个文件 (多线程，较快)",
+            "4个文件 (最大并发，最快)"
+        ])
+        self.concurrent_combo.setCurrentIndex(0)  # 默认单线程
+        self.concurrent_combo.setToolTip("同时处理的文件数量。单个文件内部总是串行处理确保稳定性，此设置只影响多个文件之间的并行度")
+        self.concurrent_combo.currentIndexChanged.connect(self.onConfigChanged)
+        
         conversion_layout.addWidget(conversion_type_label, 0, 0, Qt.AlignLeft)
         conversion_layout.addWidget(self.conversion_combo, 0, 1, Qt.AlignLeft)
         conversion_layout.addWidget(voice_label, 1, 0, Qt.AlignLeft)
         conversion_layout.addWidget(self.voice_combo, 1, 1, Qt.AlignLeft)
+        conversion_layout.addWidget(concurrent_label, 2, 0, Qt.AlignLeft)
+        conversion_layout.addWidget(self.concurrent_combo, 2, 1, Qt.AlignLeft)
         
         # 语音参数区域 - 左对齐
         voice_params_group = QGroupBox("语音参数")
@@ -999,19 +1134,52 @@ class BatchProcessDialog(QDialog):
     def removeSelected(self):
         """移除选中的文件"""
         selected_items = self.file_list_widget.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "提示", "请先选择要移除的文件")
+            return
+            
+        removed_files = []
         for item in selected_items:
             row = self.file_list_widget.row(item)
+            file_path = item.data(Qt.UserRole) if item.data(Qt.UserRole) else self.file_list[row] if row < len(self.file_list) else None
+            
+            if file_path:
+                removed_files.append(os.path.basename(file_path))
+                # 同时移除配置
+                if hasattr(self, 'file_configs') and file_path in self.file_configs:
+                    del self.file_configs[file_path]
+            
             self.file_list_widget.takeItem(row)
             if row < len(self.file_list):
                 self.file_list.pop(row)
+        
+        # 记录移除操作日志
+        if removed_files:
+            if len(removed_files) == 1:
+                self.addLog(f"🗑️ 已移除文件: {removed_files[0]}")
+            else:
+                self.addLog(f"🗑️ 已移除 {len(removed_files)} 个文件: {', '.join(removed_files[:3])}{' 等' if len(removed_files) > 3 else ''}")
         
         self.updateFileCount()
         self.updateSubtitleFileList()  # 更新字幕文件列表
     
     def clearList(self):
         """清空文件列表"""
+        if not self.file_list:
+            QMessageBox.information(self, "提示", "文件列表已经为空")
+            return
+            
+        file_count = len(self.file_list)
         self.file_list_widget.clear()
         self.file_list.clear()
+        
+        # 清空配置
+        if hasattr(self, 'file_configs'):
+            self.file_configs.clear()
+        
+        # 记录清空操作日志
+        self.addLog(f"🧹 已清空文件列表 (共移除 {file_count} 个文件)")
+        
         self.updateFileCount()
         self.updateSubtitleFileList()  # 更新字幕文件列表
     
@@ -1086,7 +1254,7 @@ class BatchProcessDialog(QDialog):
                     'volume': volume,
                     'quality': quality
                 }
-                
+        
                 global_config = {
                     'conversion_type': conversion_type,
                     **voice_params
@@ -1108,16 +1276,32 @@ class BatchProcessDialog(QDialog):
             self.remove_btn.setEnabled(False)
             self.clear_btn.setEnabled(False)
             
-            # 清空日志
-            self.log_text.clear()
-            self.addLog("开始批量处理...")
+            # 保留历史日志，添加分隔符
+            if self.log_text.toPlainText().strip():
+                self.addLog("=" * 50)
+                self.addLog("🚀 开始新的批量处理任务")
+                self.addLog("=" * 50)
+            else:
+                self.addLog("🚀 开始批量处理...")
+            
+            # 获取并发数量设置
+            if self.global_config_radio.isChecked():
+                concurrent_count = self.concurrent_combo.currentIndex() + 1  # 0-3对应1-4个文件
+            else:
+                # 在单独配置模式下，使用第一个文件的并发设置，或默认值
+                concurrent_count = 1
+                if self.file_list and self.file_list[0] in self.file_configs:
+                    concurrent_count = self.file_configs[self.file_list[0]].get('concurrent_count', 1)
+                elif hasattr(self, 'concurrent_combo'):
+                    concurrent_count = self.concurrent_combo.currentIndex() + 1
             
             # 启动处理线程
             self.process_thread = BatchProcessThread(
                 self.file_list, 
                 self.output_dir, 
                 file_configs,
-                global_config
+                global_config,
+                concurrent_count
             )
             
             # 连接信号和槽
@@ -1125,8 +1309,10 @@ class BatchProcessDialog(QDialog):
             self.process_thread.current_file.connect(self.updateCurrentFile)
             self.process_thread.file_completed.connect(self.onFileCompleted)
             self.process_thread.all_completed.connect(self.onAllCompleted)
-            
-            # 启动线程
+            self.process_thread.subtitle_generated.connect(self.updateSubtitleData)
+            self.process_thread.step_progress.connect(self.updateStepProgress)
+        
+        # 启动线程
             self.process_thread.start()
             
         except Exception as e:
@@ -1142,7 +1328,7 @@ class BatchProcessDialog(QDialog):
             self.add_folder_btn.setEnabled(True)
             self.remove_btn.setEnabled(True)
             self.clear_btn.setEnabled(True)
-    
+
     def updateBatchProgress(self, progress):
         """更新总体进度"""
         try:
@@ -1156,14 +1342,40 @@ class BatchProcessDialog(QDialog):
         """更新当前处理的文件"""
         try:
             if hasattr(self, 'current_file_label'):
-                short_name = os.path.basename(file_name)
-                self.current_file_label.setText(f"当前文件: {short_name}")
-                self.status_label.setText(f"正在处理: {short_name}")
+                # 检查是否包含步骤信息
+                if "正在处理:" in file_name:
+                    # 如果是来自线程的详细信息，直接显示
+                    self.current_file_label.setText(f"当前文件: {file_name}")
+                    self.status_label.setText(f"状态: {file_name}")
+                else:
+                    # 否则按原方式处理
+                    short_name = os.path.basename(file_name)
+                    self.current_file_label.setText(f"当前文件: {short_name}")
+                    self.status_label.setText(f"正在处理: {short_name}")
+                
                 # 重置当前文件进度
                 if hasattr(self, 'current_file_progress'):
                     self.current_file_progress.setValue(0)
         except Exception as e:
             print(f"更新当前文件失败: {e}")
+    
+    def updateStepProgress(self, step_name, detail_message):
+        """更新处理步骤进度"""
+        try:
+            # 更新状态标签显示详细步骤
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"状态: {step_name} - {detail_message}")
+            
+            # 在日志中记录步骤进度
+            if step_name.startswith("步骤"):
+                self.addLog(f"📋 {step_name}: {detail_message}")
+            elif step_name == "错误":
+                self.addLog(f"❌ 错误: {detail_message}")
+            else:
+                self.addLog(f"ℹ️ {step_name}: {detail_message}")
+                
+        except Exception as e:
+            print(f"更新步骤进度失败: {e}")
 
     def updateCurrentFileProgress(self, progress):
         """更新当前文件的处理进度"""
@@ -1342,14 +1554,150 @@ class BatchProcessDialog(QDialog):
         print(f"已加载文件配置: {os.path.basename(file_path)} -> {config['conversion_type']}")
 
     def getDefaultConfig(self):
-        """获取默认配置"""
-        return {
+        """获取默认配置（优先使用主界面保存的配置）"""
+        # 默认配置
+        default_config = {
             'conversion_type': '智能转换',
             'voice_type': 'xiaoyan',
             'speed': 100,
             'volume': 80,
-            'quality': '高质量'
+            'quality': '高质量',
+            'concurrent_count': 1
         }
+        
+        # 尝试从主界面的config.json读取配置
+        try:
+            config_file = 'config.json'
+            if os.path.exists(config_file):
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    saved_config = json.load(f)
+                
+                # 更新配置（保留现有逻辑，同时支持新格式）
+                if 'voice_speed' in saved_config:
+                    default_config['speed'] = saved_config.get('voice_speed', 100)
+                if 'voice_volume' in saved_config:
+                    default_config['volume'] = saved_config.get('voice_volume', 80)
+                if 'voice_type' in saved_config:
+                    default_config['voice_type'] = saved_config.get('voice_type', 'xiaoyan')
+                if 'output_quality' in saved_config:
+                    default_config['quality'] = saved_config.get('output_quality', '高质量')
+                if 'concurrent_count' in saved_config:
+                    default_config['concurrent_count'] = saved_config.get('concurrent_count', 1)
+                
+                print(f"✓ 已从主界面配置加载设置: 语速{default_config['speed']}%, 音量{default_config['volume']}%, 发音人{default_config['voice_type']}")
+                
+        except Exception as e:
+            print(f"警告: 无法读取主界面配置文件，使用默认配置: {e}")
+        
+        # 尝试使用config_manager（如果可用）
+        if CONFIG_MANAGER_AVAILABLE:
+            try:
+                voice_config = config_manager.get_voice_config()
+                if voice_config:
+                    default_config['speed'] = voice_config.get('speed', default_config['speed'])
+                    default_config['volume'] = voice_config.get('volume', default_config['volume'])
+                    default_config['voice_type'] = voice_config.get('voice_type', default_config['voice_type'])
+                    print(f"✓ 已从config_manager加载语音配置")
+            except Exception as e:
+                print(f"警告: config_manager读取失败: {e}")
+        
+        return default_config
+    
+    def reloadConfigFromMainInterface(self):
+        """重新从主界面加载配置 - 改进版本，确保配置同步"""
+        try:
+            print("开始从主界面重新加载配置...")
+            
+            # 1. 重新从config.json加载最新配置
+            if os.path.exists('config.json'):
+                with open('config.json', 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    print(f"从config.json加载配置: {list(config.keys())}")
+                    
+                    # 2. 直接更新界面组件
+                    # 更新语速
+                    if hasattr(self, 'speed_slider'):
+                        self.speed_slider.setValue(config.get('voice_speed', 100))
+                        print(f"设置语速: {config.get('voice_speed', 100)}")
+                    
+                    # 更新音量
+                    if hasattr(self, 'volume_slider'):
+                        self.volume_slider.setValue(config.get('voice_volume', 80))
+                        print(f"设置音量: {config.get('voice_volume', 80)}")
+                    
+                    # 更新发音人设置
+                    if hasattr(self, 'voice_combo'):
+                        voice_type = config.get('voice_type', 'xiaoyan')
+                        for i in range(self.voice_combo.count()):
+                            if self.voice_combo.itemText(i).startswith(voice_type):
+                                self.voice_combo.setCurrentIndex(i)
+                                print(f"设置发音人: {voice_type} -> 索引 {i}")
+                                break
+                    
+                    # 更新转换类型（如果存在）
+                    if hasattr(self, 'conversion_combo'):
+                        conversion_type = config.get('conversion_type', '智能转换')
+                        if conversion_type in [self.conversion_combo.itemText(i) for i in range(self.conversion_combo.count())]:
+                            self.conversion_combo.setCurrentText(conversion_type)
+                            print(f"设置转换类型: {conversion_type}")
+                    
+                    # 更新输出质量
+                    if hasattr(self, 'quality_combo'):
+                        quality = config.get('output_quality', '高质量')
+                        self.quality_combo.setCurrentText(quality)
+                        print(f"设置输出质量: {quality}")
+                    
+                    # 更新并发数量
+                    if hasattr(self, 'concurrent_combo'):
+                        concurrent_count = config.get('concurrent_count', 1)
+                        if 1 <= concurrent_count <= 4:
+                            self.concurrent_combo.setCurrentIndex(concurrent_count - 1)  # 0-3对应1-4
+                            print(f"设置并发数量: {concurrent_count} -> 索引 {concurrent_count - 1}")
+                        else:
+                            print(f"并发数量超出范围: {concurrent_count}，使用默认值")
+                            self.concurrent_combo.setCurrentIndex(0)
+                    
+                    # 3. 更新全局默认配置缓存
+                    self.global_config = self.getDefaultConfig()
+                    
+                    # 4. 如果在统一配置模式，更新所有文件的配置
+                    if hasattr(self, 'uniform_config_radio') and self.uniform_config_radio.isChecked():
+                        updated_config = {
+                            'conversion_type': self.conversion_combo.currentText(),
+                            'voice_type': self.voice_combo.currentText().split(' - ')[0] if hasattr(self, 'voice_combo') else config.get('voice_type', 'xiaoyan'),
+                            'speed': self.speed_slider.value() if hasattr(self, 'speed_slider') else config.get('voice_speed', 100),
+                            'volume': self.volume_slider.value() if hasattr(self, 'volume_slider') else config.get('voice_volume', 80),
+                            'quality': self.quality_combo.currentText() if hasattr(self, 'quality_combo') else config.get('output_quality', '高质量'),
+                            'concurrent_count': config.get('concurrent_count', 1)
+                        }
+                        
+                        for file_path in self.file_list:
+                            self.file_configs[file_path] = updated_config.copy()
+                        
+                        print(f"已将统一配置应用到所有 {len(self.file_list)} 个文件")
+                    
+                    print(f"✅ 批量处理界面配置已更新:")
+                    print(f"   语速: {config.get('voice_speed', 100)}")
+                    print(f"   音量: {config.get('voice_volume', 80)}")
+                    print(f"   发音人: {config.get('voice_type', 'xiaoyan')}")
+                    print(f"   并发数: {config.get('concurrent_count', 1)}")
+                    print(f"   输出质量: {config.get('output_quality', '高质量')}")
+            
+            else:
+                print("config.json 不存在，使用默认配置")
+                self.loadDefaultConfig()
+            
+            # 5. 刷新当前选中文件的配置显示
+            if hasattr(self, 'file_list_widget') and self.file_list_widget.currentRow() >= 0:
+                self.onFileSelectionChanged()
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ 重新加载配置失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def loadDefaultConfig(self):
         """加载默认配置到UI"""
@@ -1365,6 +1713,8 @@ class BatchProcessDialog(QDialog):
         self.speed_slider.setValue(config['speed'])
         self.volume_slider.setValue(config['volume'])
         self.quality_combo.setCurrentText(config['quality'])
+        concurrent_count = config.get('concurrent_count', 1)
+        self.concurrent_combo.setCurrentIndex(concurrent_count - 1)  # 0-3对应1-4个文件
 
     def applyConfigToAll(self):
         """将当前配置应用到所有文件"""
@@ -1386,7 +1736,8 @@ class BatchProcessDialog(QDialog):
                 'voice_type': self.voice_combo.currentText().split(' - ')[0],
                 'speed': self.speed_slider.value(),
                 'volume': self.volume_slider.value(),
-                'quality': self.quality_combo.currentText()
+                'quality': self.quality_combo.currentText(),
+                'concurrent_count': self.concurrent_combo.currentIndex() + 1  # 0-3对应1-4个文件
             }
             
             # 应用配置到所有文件
@@ -1486,16 +1837,17 @@ class BatchProcessDialog(QDialog):
         
         # 表格显示
         table = QTableWidget()
-        table.setColumnCount(6)
-        table.setHorizontalHeaderLabels(["文件名", "转换类型", "发音人", "语速", "音量", "质量"])
+        table.setColumnCount(7)
+        table.setHorizontalHeaderLabels(["文件名", "转换类型", "发音人", "语速", "音量", "质量", "并发"])
         
         # 设置列宽
-        table.setColumnWidth(0, 200)  # 文件名
+        table.setColumnWidth(0, 180)  # 文件名
         table.setColumnWidth(1, 100)  # 转换类型
         table.setColumnWidth(2, 120)  # 发音人
         table.setColumnWidth(3, 60)   # 语速
         table.setColumnWidth(4, 60)   # 音量
         table.setColumnWidth(5, 80)   # 质量
+        table.setColumnWidth(6, 50)   # 并发
         
         # 填充数据
         table.setRowCount(len(self.file_list))
@@ -1511,7 +1863,12 @@ class BatchProcessDialog(QDialog):
                 config = self.getDefaultConfig()
             
             conv_type = config['conversion_type']
-            voice_params = config['voice_params']
+            # 修复：配置结构是扁平的，不需要voice_params子对象
+            voice_type = config.get('voice_type', 'xiaoyan')
+            speed = config.get('speed', 100)
+            volume = config.get('volume', 80)
+            quality = config.get('quality', '高质量')
+            concurrent_count = config.get('concurrent_count', 1)
             
             # 统计配置类型
             if conv_type in config_stats:
@@ -1522,10 +1879,11 @@ class BatchProcessDialog(QDialog):
             # 设置表格内容
             table.setItem(i, 0, QTableWidgetItem(file_name))
             table.setItem(i, 1, QTableWidgetItem(conv_type))
-            table.setItem(i, 2, QTableWidgetItem(voice_params['voice_type']))
-            table.setItem(i, 3, QTableWidgetItem(f"{voice_params['speed']}%"))
-            table.setItem(i, 4, QTableWidgetItem(f"{voice_params['volume']}%"))
-            table.setItem(i, 5, QTableWidgetItem(voice_params['quality']))
+            table.setItem(i, 2, QTableWidgetItem(voice_type))
+            table.setItem(i, 3, QTableWidgetItem(f"{speed}%"))
+            table.setItem(i, 4, QTableWidgetItem(f"{volume}%"))
+            table.setItem(i, 5, QTableWidgetItem(quality))
+            table.setItem(i, 6, QTableWidgetItem(str(concurrent_count)))
         
         # 更新统计信息
         stats_text = "配置统计: "
@@ -1813,6 +2171,24 @@ class BatchProcessDialog(QDialog):
 def show_batch_dialog(parent=None):
     """显示批量处理对话框"""
     dialog = BatchProcessDialog(parent)
+    
+    # 如果父窗口是主界面，连接配置更新信号
+    if parent and hasattr(parent, 'onConfigUpdated'):
+        # 当主界面配置更新时，通知批量处理对话框重新加载配置
+        def on_main_config_updated():
+            if hasattr(dialog, 'reloadConfigFromMainInterface'):
+                success = dialog.reloadConfigFromMainInterface()
+                if success:
+                    print("✅ 批量处理对话框已同步主界面配置")
+        
+        # 连接主界面的配置更新信号（如果有的话）
+        # 这个连接会在主界面的設置對話框發出信號時觸發
+        try:
+            # 这里我们会在enhanced_UI.py中处理信号连接
+            dialog._config_update_callback = on_main_config_updated
+        except Exception as e:
+            print(f"配置同步连接失败: {e}")
+    
     dialog.exec_()
 
 if __name__ == "__main__":

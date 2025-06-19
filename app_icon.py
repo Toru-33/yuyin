@@ -97,4 +97,20 @@ ICON_THEME = {
 
 def get_themed_icon(icon_name):
     """获取主题图标"""
-    return ICON_THEME.get(icon_name, "❓") 
+    return ICON_THEME.get(icon_name, "❓")
+
+def set_app_icon(window):
+    """为窗口设置应用程序图标"""
+    try:
+        # 创建并设置图标
+        icon = create_app_icon()
+        window.setWindowIcon(icon)
+        
+        # 为应用程序设置图标（任务栏显示）
+        if QApplication.instance():
+            QApplication.instance().setWindowIcon(icon)
+        
+        print("✅ 应用程序图标设置成功")
+    except Exception as e:
+        print(f"⚠️ 设置应用程序图标失败: {e}")
+        # 不影响程序运行，继续执行 

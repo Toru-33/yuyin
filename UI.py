@@ -16,10 +16,8 @@ import addNewSound
 import addSrt
 import video_to_txt
 import voice_get_text
-import syntheticSpeech
-import syntheticSpeechCn
-import syntheticSpeechTranslateToEn
-import syntheticSpeechTranslateToCn
+# 移除冗余模块，统一使用 unified_speech_synthesis
+import unified_speech_synthesis
 import generateWav
 from PyQt5.QtWidgets import QApplication, QMessageBox
 
@@ -134,19 +132,49 @@ class Ui_MainWindow(object):
                 print("finish del_audio")
                 #生成字幕文件——————————————————————————————————————————————————————————————————————————————————
                 video_to_txt.run(wav_path, save_path)
-                #获取下拉框的内容
+                # 获取下拉框的内容
                 comboBox_text = self.comboBox.currentText()
                 filename = 'subtitle.srt'
                 subtitle_file = os.path.join(save_path, filename)
-                # subtitle_file = "D:\PyCharmProfessional\PyCharm\Project\YuYinTiHuan/test\Cn.srt"
-                if comboBox_text == "中文转英文":
-                    syntheticSpeechTranslateToEn.run(video_without_sound, subtitle_file)
-                elif comboBox_text == "中文转中文":
-                    syntheticSpeechCn.run(video_without_sound, subtitle_file)
-                elif comboBox_text == "英文转中文":
-                    syntheticSpeechTranslateToCn.run(video_without_sound, subtitle_file)
-                elif comboBox_text == "英文转英文":
-                    syntheticSpeech.run(video_without_sound, subtitle_file)
+                
+                # 构建输出视频文件路径
+                output_video_path = os.path.join(save_path, "NewVideo.mp4")
+                
+                # 使用统一的语音合成模块
+                synthesis = unified_speech_synthesis.UnifiedSpeechSynthesis()
+                
+                try:
+                    if comboBox_text == "中文转英文":
+                        generated_video_path = synthesis.process_video(
+                            video_file=video_path,
+                            subtitle_file=subtitle_file,
+                            output_path=output_video_path,
+                            conversion_type="中文转英文"
+                        )
+                    elif comboBox_text == "中文转中文":
+                        generated_video_path = synthesis.process_video(
+                            video_file=video_path,
+                            subtitle_file=subtitle_file,
+                            output_path=output_video_path,
+                            conversion_type="中文转中文"
+                        )
+                    elif comboBox_text == "英文转中文":
+                        generated_video_path = synthesis.process_video(
+                            video_file=video_path,
+                            subtitle_file=subtitle_file,
+                            output_path=output_video_path,
+                            conversion_type="英文转中文"
+                        )
+                    elif comboBox_text == "英文转英文":
+                        generated_video_path = synthesis.process_video(
+                            video_file=video_path,
+                            subtitle_file=subtitle_file,
+                            output_path=output_video_path,
+                            conversion_type="英文转英文"
+                        )
+                    print(f"✅ 语音合成完成: {generated_video_path}")
+                except Exception as synthesis_error:
+                    raise Exception(f"语音合成失败: {synthesis_error}")
             except Exception as e:
                 self.show_message("生成视频过程中出现错误：" + str(e))
         else:

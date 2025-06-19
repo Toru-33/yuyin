@@ -115,10 +115,9 @@ class RequestApi(object):
         response = requests.post(lfasr_host + apiname, data=data, files=files, headers=headers)
         result = json.loads(response.text)
         if result["ok"] == 0:
-            print("{} success:".format(apiname) + str(result))
             return result
         else:
-            print("{} error:".format(apiname) + str(result))
+            print(f"API请求失败 {apiname}: {result}")
             exit(0)
             return result
 
@@ -147,9 +146,8 @@ class RequestApi(object):
                                              files=files)
                 if response.get('ok') != 0:
                     # 上传分片失败
-                    print('upload slice fail, response: ' + str(response))
+                    print(f'上传分片失败: {response}')
                     return False
-                print('upload slice ' + str(index) + ' success')
                 index += 1
         finally:
             'file index:' + str(file_object.tell())
@@ -182,22 +180,19 @@ class RequestApi(object):
             progress = self.get_progress_request(taskid)
             progress_dic = progress
             if progress_dic['err_no'] != 0 and progress_dic['err_no'] != 26605:
-                print('task error: ' + progress_dic['failed'])
+                print(f'任务错误: {progress_dic["failed"]}')
                 return
             else:
                 data = progress_dic['data']
                 task_status = json.loads(data)
                 if task_status['status'] == 9:
-                    print('task ' + taskid + ' finished')
                     break
-                print('The task ' + taskid + ' is in processing, task status: ' + str(data))
 
             # 每次获取进度间隔20S
             time.sleep(20)
         # 5 . 获取结果
         aaa=self.get_result_request(taskid=taskid)
         return aaa
-        # print(aaa)
 
 
 

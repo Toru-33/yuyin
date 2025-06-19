@@ -293,6 +293,7 @@ def run(video_file, subtitle_file, output_path, voice_type="x4_EnUs_Laura_educat
 
                 # 添加到segments列表中
                 segments.append((text, start_time_timestamp, end_time_timestamp))
+                
         except Exception as e:
             print(f"解析字幕行 {i} 时出错: {e}")
             continue

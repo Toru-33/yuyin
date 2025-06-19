@@ -14,12 +14,6 @@ def videoToWav(videoPath, savePath, output_filename=None):
         # 确保输出目录存在
         os.makedirs(savePath, exist_ok=True)
         
-        print(f"正在从视频提取音频: {videoPath}")
-        
-        # 使用VideoFileClip提取音频（更稳定）
-        video = VideoFileClip(videoPath)
-        audio = video.audio
-        
         # 生成输出文件名 - 支持自定义文件名
         if output_filename:
             output_path = os.path.join(savePath, output_filename).replace('\\', '/')
@@ -30,14 +24,45 @@ def videoToWav(videoPath, savePath, output_filename=None):
             clean_name = re.sub(r'[^\w\-_]', '_', video_name)
             output_path = os.path.join(savePath, f'{clean_name}_extractedAudio.wav').replace('\\', '/')
         
-        # 写入音频文件
-        audio.write_audiofile(output_path, verbose=False, logger=None)
+        # 使用VideoFileClip提取音频（更稳定）
+        with VideoFileClip(videoPath) as video:
+            if video.audio is None:
+                raise Exception("视频文件没有音频轨道")
+            
+            audio = video.audio
+            
+            # 检查音频对象是否有效
+            if audio is None:
+                raise Exception("无法从视频中提取音频对象")
+            
+            try:
+                # 写入音频文件，移除不支持的temp_audiofile参数
+                audio.write_audiofile(
+                    output_path, 
+                    verbose=False, 
+                    logger=None
+                )
+                
+            except Exception as write_error:
+                print(f"MoviePy写入失败: {write_error}")
+                
+                # 备用方案：使用ffmpeg直接提取，添加编码处理
+                cmd = ['ffmpeg', '-y', '-i', videoPath, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', output_path]
+                
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+                    if result.returncode != 0:
+                        raise Exception(f"ffmpeg提取音频失败: {result.stderr}")
+                except UnicodeDecodeError:
+                    # 如果编码失败，尝试不解码输出
+                    result = subprocess.run(cmd, capture_output=True, text=False)
+                    if result.returncode != 0:
+                        raise Exception(f"ffmpeg提取音频失败")
         
-        # 释放资源
-        audio.close()
-        video.close()
+        # 验证输出文件
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise Exception(f"音频文件生成失败或为空: {output_path}")
         
-        print(f"音频提取成功: {output_path}")
         return output_path
         
     except Exception as e:
@@ -61,8 +86,6 @@ def changeCoding(wavPath, outputPath=None):
         else:
             temp_output = outputPath.replace('\\', '/')
         
-        print(f"正在转换音频编码: {wavPath} -> {temp_output}")
-        
         # 使用ffmpeg转换音频格式
         cmd = [
             "ffmpeg", "-y",  # -y 覆盖输出文件
@@ -73,12 +96,30 @@ def changeCoding(wavPath, outputPath=None):
             temp_output      # 输出到临时文件
         ]
         
-        # 执行命令
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+        # 执行命令，改善编码处理
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        except UnicodeDecodeError:
+            # 如果编码问题，尝试不解码输出
+            result = subprocess.run(cmd, capture_output=True, text=False)
+            # 转换返回码检查，避免访问.stderr
+            if result.returncode != 0:
+                print("ffmpeg转换失败（编码问题），使用原始音频文件")
+                return wavPath
+            else:
+                # 继续后续处理...
+                if outputPath is None:
+                    try:
+                        os.remove(wavPath)
+                        os.rename(temp_output, wavPath)
+                        return wavPath
+                    except Exception as e:
+                        print(f"文件替换失败: {e}")
+                        return temp_output
+                else:
+                    return temp_output
         
         if result.returncode == 0:
-            print(f"音频编码转换成功: {temp_output}")
-            
             # 如果是覆盖原文件，则替换原文件
             if outputPath is None:
                 try:
@@ -86,7 +127,6 @@ def changeCoding(wavPath, outputPath=None):
                     os.remove(wavPath)
                     # 重命名临时文件为原文件名
                     os.rename(temp_output, wavPath)
-                    print(f"已替换原文件: {wavPath}")
                     return wavPath
                 except Exception as e:
                     print(f"文件替换失败: {e}")
@@ -97,7 +137,6 @@ def changeCoding(wavPath, outputPath=None):
         else:
             print(f"ffmpeg错误: {result.stderr}")
             # 如果ffmpeg失败，返回原文件
-            print("ffmpeg转换失败，使用原始音频文件")
             return wavPath
             
     except FileNotFoundError as e:

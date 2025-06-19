@@ -433,7 +433,7 @@ def run(video_file, subtitle_file, output_path, voice_type="xiaoyan", speed=100,
             wsParam = Ws_Param(
                 APPID='dece0a1f', 
                 APISecret='Y2I4YTUxMDljZjk2YzAwZGMzNTgwYTNl',
-                           APIKey='5cc4877fa4b7d173d8f1c085e50a4788',
+                APIKey='5cc4877fa4b7d173d8f1c085e50a4788',
                 Text=translated_text,
                 voice_type=voice_type,
                 speed=speed,
