@@ -186,16 +186,17 @@ QComboBox QAbstractItemView {
 }
 
 /* --- 按钮 --- */
+/* 【优化】响应式按钮样式 - 使用更灵活的尺寸设置 */
 QPushButton {
     border: 2px solid transparent;
     border-radius: 0.6em;
-    padding: 0.8em 1.2em;
+    padding: 0.6em 1.0em;  /* 减小内边距 */
     font-size: 1.0em;
     font-weight: 600;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
         stop:0 #ffffff, stop:1 #f8f9fa);
     color: #495057;
-    min-height: 2.5em;
+    min-height: 2.2em;  /* 减小最小高度，使按钮更紧凑 */
 }
 QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -350,10 +351,24 @@ QPushButton:disabled {
 
 /* 小型按钮 */
 QPushButton[objectName="smallButton"] {
-    padding: 0.5em 1.0em;
+    padding: 0.4em 0.8em;  /* 减小小按钮内边距 */
     font-size: 0.9em;
-    min-height: 2.0em;
+    min-height: 1.8em;     /* 减小小按钮高度 */
     border-radius: 0.5em;
+}
+
+/* 【优化】QSplitter 响应式样式 */
+QSplitter::handle {
+    background-color: #e9ecef;
+    border: 1px solid #dee2e6;
+    border-radius: 0.2em;
+}
+QSplitter::handle:hover {
+    background-color: #0078D7;
+    border-color: #005a9e;
+}
+QSplitter::handle:pressed {
+    background-color: #005a9e;
 }
 
 /* --- 进度条 --- */

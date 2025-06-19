@@ -461,11 +461,13 @@ class BatchProcessDialog(QDialog):
     def setupUi(self):
         self.setWindowTitle("批量视频处理")
         self.setModal(True)
-        self.resize(1100, 800)  # 增加窗口大小以确保组件完整显示
+        # 【修复】减小窗口高度，防止超出屏幕
+        self.resize(1000, 700)  # 调整窗口大小，确保在标准屏幕上完整显示
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(18)  # 增加间距
-        layout.setContentsMargins(25, 25, 25, 25)  # 增加边距确保显示完整
+        # 【修复】减小间距和边距，节省垂直空间
+        layout.setSpacing(12)  # 减小间距
+        layout.setContentsMargins(15, 15, 15, 15)  # 减小边距
         
         # 顶部标题
         title_label = QLabel("批量视频语音转换处理")
@@ -483,20 +485,31 @@ class BatchProcessDialog(QDialog):
         """)
         layout.addWidget(title_label)
         
-        # 创建主要内容区域的水平布局
-        main_content = QHBoxLayout()
-        main_content.setSpacing(18)
+        # 【优化】使用 QSplitter 替换固定的水平布局，实现灵活的左右分割
+        main_content_splitter = QSplitter(Qt.Horizontal)
+        main_content_splitter.setHandleWidth(8)
+        main_content_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #e0e0e0;
+                border-radius: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #c0c0c0;
+            }
+        """)
         
         # 左侧：文件列表区域
-        left_panel = QVBoxLayout()
+        left_panel_widget = QWidget()
+        left_panel = QVBoxLayout(left_panel_widget)
         
         # 文件列表区域
         file_section = QGroupBox("文件列表")
-        file_section.setMinimumWidth(480)
-        file_section.setMaximumHeight(200)  # 减小文件列表区域高度
+        # 【优化】移除固定宽度和最大高度限制，让其更灵活地适应窗口大小
+        file_section.setMinimumWidth(400)
+        # 移除最大高度限制，让其根据内容自动调整
         file_layout = QVBoxLayout(file_section)
-        file_layout.setSpacing(8)  # 减小组件间距
-        file_layout.setContentsMargins(10, 10, 10, 10)  # 减小边距
+        file_layout.setSpacing(6)  # 进一步减小组件间距
+        file_layout.setContentsMargins(8, 8, 8, 8)  # 减小边距
         
         # 文件操作按钮
         file_buttons_container = QWidget()
@@ -508,32 +521,37 @@ class BatchProcessDialog(QDialog):
         self.add_files_btn = QPushButton("添加文件")
         self.add_files_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         self.add_files_btn.clicked.connect(self.addFiles)
-        self.add_files_btn.setMinimumHeight(32)  # 减小按钮高度
-        self.add_files_btn.setMinimumWidth(70)  # 减小按钮宽度
+        # 【优化】移除固定尺寸，使用更灵活的最小尺寸
+        self.add_files_btn.setMinimumHeight(30)
+        self.add_files_btn.setMinimumWidth(60)
         
         self.add_folder_btn = QPushButton("添加文件夹")
         self.add_folder_btn.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
         self.add_folder_btn.clicked.connect(self.addFolder)
-        self.add_folder_btn.setMinimumHeight(32)  # 减小按钮高度
-        self.add_folder_btn.setMinimumWidth(80)  # 调整按钮宽度
+        # 【优化】移除固定尺寸
+        self.add_folder_btn.setMinimumHeight(30)
+        self.add_folder_btn.setMinimumWidth(70)
         
         self.remove_btn = QPushButton("移除选中")
         self.remove_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
         self.remove_btn.clicked.connect(self.removeSelected)
-        self.remove_btn.setMinimumHeight(32)  # 减小按钮高度
-        self.remove_btn.setMinimumWidth(70)  # 减小按钮宽度
+        # 【优化】移除固定尺寸
+        self.remove_btn.setMinimumHeight(30)
+        self.remove_btn.setMinimumWidth(60)
         
         self.clear_btn = QPushButton("清空列表")
         self.clear_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton))
         self.clear_btn.clicked.connect(self.clearList)
-        self.clear_btn.setMinimumHeight(32)  # 减小按钮高度
-        self.clear_btn.setMinimumWidth(70)  # 减小按钮宽度
+        # 【优化】移除固定尺寸
+        self.clear_btn.setMinimumHeight(30)
+        self.clear_btn.setMinimumWidth(60)
         
         self.view_config_btn = QPushButton("查看配置")
         self.view_config_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
         self.view_config_btn.clicked.connect(self.viewAllConfigurations)
-        self.view_config_btn.setMinimumHeight(32)  # 减小按钮高度
-        self.view_config_btn.setMinimumWidth(70)  # 减小按钮宽度
+        # 【优化】移除固定尺寸
+        self.view_config_btn.setMinimumHeight(30)
+        self.view_config_btn.setMinimumWidth(60)
         
         file_buttons_layout.addWidget(self.add_files_btn)
         file_buttons_layout.addWidget(self.add_folder_btn)
@@ -545,8 +563,9 @@ class BatchProcessDialog(QDialog):
         # 文件列表
         self.file_list_widget = QListWidget()
         self.file_list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.file_list_widget.setMinimumHeight(80)  # 减小文件列表高度
-        self.file_list_widget.setMaximumHeight(120)  # 减小最大高度
+        # 【优化】减小最小高度，移除最大高度限制，让列表更灵活
+        self.file_list_widget.setMinimumHeight(60)
+        # 不设置最大高度，让其根据内容和可用空间调整
         self.file_list_widget.itemSelectionChanged.connect(self.onFileSelectionChanged)
         
         # 文件数量显示
@@ -636,8 +655,9 @@ class BatchProcessDialog(QDialog):
         
         self.start_btn = QPushButton("开始批量处理")
         self.start_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.start_btn.setMinimumHeight(42)  # 增加按钮高度
-        self.start_btn.setMinimumWidth(150)  # 增加按钮宽度，确保文字显示完全
+        # 【优化】减小按钮尺寸，让其更灵活
+        self.start_btn.setMinimumHeight(36)
+        self.start_btn.setMinimumWidth(120)
         self.start_btn.setStyleSheet("""
             QPushButton {
                 font-size: 13px;
@@ -663,8 +683,9 @@ class BatchProcessDialog(QDialog):
         
         self.stop_btn = QPushButton("停止处理")
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-        self.stop_btn.setMinimumHeight(42)  # 增加按钮高度
-        self.stop_btn.setMinimumWidth(120)  # 增加按钮宽度
+        # 【优化】减小按钮尺寸
+        self.stop_btn.setMinimumHeight(36)
+        self.stop_btn.setMinimumWidth(100)
         self.stop_btn.setEnabled(False)
         self.stop_btn.setStyleSheet("""
             QPushButton {
@@ -720,7 +741,8 @@ class BatchProcessDialog(QDialog):
         
         self.output_dir_btn = QPushButton("选择输出目录")
         self.output_dir_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
-        self.output_dir_btn.setMinimumHeight(32)
+        # 【优化】减小按钮高度
+        self.output_dir_btn.setMinimumHeight(30)
         self.output_dir_btn.clicked.connect(self.selectOutputDir)
         
         output_dir_layout.addWidget(self.output_path_label, 1)
@@ -736,8 +758,9 @@ class BatchProcessDialog(QDialog):
         log_layout.setSpacing(5)
         
         self.log_text = QTextEdit()
-        self.log_text.setMaximumHeight(120)
-        self.log_text.setMinimumHeight(80)
+        # 【优化】减小日志区域的高度限制，让其更灵活
+        self.log_text.setMaximumHeight(100)
+        self.log_text.setMinimumHeight(60)
         self.log_text.setReadOnly(True)
         self.log_text.setStyleSheet("""
             QTextEdit {
@@ -1034,13 +1057,15 @@ class BatchProcessDialog(QDialog):
         right_layout.addWidget(config_mode_group)
         right_layout.addWidget(self.config_container)
         
-        # 组装主布局
-        left_widget = QWidget()
-        left_widget.setLayout(left_panel)
+        # 【优化】将左右面板添加到 QSplitter 中
+        main_content_splitter.addWidget(left_panel_widget)
+        main_content_splitter.addWidget(right_widget)
+        main_content_splitter.setStretchFactor(0, 1)  # 左侧初始比例为1
+        main_content_splitter.setStretchFactor(1, 1)  # 右侧初始比例为1
+        main_content_splitter.setCollapsible(0, False)  # 不允许左侧面板被完全折叠
+        main_content_splitter.setCollapsible(1, False)  # 不允许右侧面板被完全折叠
         
-        main_content.addWidget(left_widget)
-        main_content.addWidget(right_widget, 1)  # 右侧占更多空间
-        layout.addLayout(main_content)
+        layout.addWidget(main_content_splitter)
     
     def addFiles(self):
         """添加文件"""
