@@ -585,7 +585,7 @@ class SettingsDialog(QDialog):
     
     def setupUi(self):
         self.setWindowTitle("设置")
-        self.setFixedSize(580, 520)  # 稍微增大以容纳更好的布局
+        self.setFixedSize(580, 550)  # 增加高度以容纳翻译配置
         layout = QVBoxLayout()
         layout.setSpacing(10)  # 增加整体间距
         
@@ -611,8 +611,8 @@ class SettingsDialog(QDialog):
         # API设置选项卡
         api_tab = QWidget()
         api_main_layout = QVBoxLayout()
-        api_main_layout.setSpacing(15)  # 增加分组间距
-        api_main_layout.setContentsMargins(15, 15, 15, 15)  # 增加内边距
+        api_main_layout.setSpacing(8)  # 减少分组间距，为百度翻译部分腾出空间
+        api_main_layout.setContentsMargins(15, 10, 15, 10)  # 减少内边距
         
         # 语音转写API配置
         self.xunfei_appid = QLineEdit()
@@ -653,9 +653,9 @@ class SettingsDialog(QDialog):
         stt_group = QGroupBox("🎤 科大讯飞语音转写API (STT)")
         stt_group.setStyleSheet(group_style)
         stt_layout = QFormLayout()
-        stt_layout.setVerticalSpacing(8)  # 增加行间距
-        stt_layout.setHorizontalSpacing(10)  # 增加列间距
-        stt_layout.setContentsMargins(15, 20, 15, 15)  # 增加内边距
+        stt_layout.setVerticalSpacing(6)  # 减少行间距
+        stt_layout.setHorizontalSpacing(10)  
+        stt_layout.setContentsMargins(15, 15, 15, 10)  # 减少内边距
         stt_layout.addRow("APPID:", self.xunfei_appid)
         stt_layout.addRow("APIKey:", self.xunfei_apikey)
         stt_layout.addRow("APISecret:", self.xunfei_apisecret)
@@ -664,9 +664,9 @@ class SettingsDialog(QDialog):
         tts_group = QGroupBox("🗣️ 科大讯飞语音合成API (TTS)")
         tts_group.setStyleSheet(group_style)
         tts_layout = QFormLayout()
-        tts_layout.setVerticalSpacing(8)
+        tts_layout.setVerticalSpacing(6)  # 减少行间距
         tts_layout.setHorizontalSpacing(10)
-        tts_layout.setContentsMargins(15, 20, 15, 15)
+        tts_layout.setContentsMargins(15, 15, 15, 10)  # 减少内边距
         tts_layout.addRow("APPID:", self.xunfei_tts_appid)
         tts_layout.addRow("APIKey:", self.xunfei_tts_apikey)
         tts_layout.addRow("APISecret:", self.xunfei_tts_apisecret)
@@ -675,11 +675,51 @@ class SettingsDialog(QDialog):
         baidu_group = QGroupBox("🌐 百度翻译API")
         baidu_group.setStyleSheet(group_style)
         baidu_layout = QFormLayout()
-        baidu_layout.setVerticalSpacing(8)
+        baidu_layout.setVerticalSpacing(6)  # 减少行间距
         baidu_layout.setHorizontalSpacing(10)
-        baidu_layout.setContentsMargins(15, 20, 15, 15)
+        baidu_layout.setContentsMargins(15, 15, 15, 15)  # 调整内边距为百度翻译API留出更多空间
+        
+        # API基础配置
         baidu_layout.addRow("APPID:", self.baidu_appid)
         baidu_layout.addRow("AppKey:", self.baidu_appkey)
+        
+        # 翻译类型选择
+        self.translation_type = QComboBox()
+        self.translation_type.addItems(["通用翻译", "领域翻译"])
+        self.translation_type.setToolTip("选择使用通用翻译API还是垂直领域翻译API")
+        self.translation_type.setMinimumWidth(180)  # 设置最小宽度
+        self.translation_type.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.translation_type.currentTextChanged.connect(self.onTranslationTypeChanged)
+        
+        # 领域选择（默认隐藏）
+        self.translation_domain = QComboBox()
+        self.translation_domain.addItems([
+            "it (信息技术)",
+            "finance (金融)", 
+            "machinery (机械)",
+            "senimed (生物医学)",
+            "novel (网络文学)",
+            "academic (学术论文)",
+            "aerospace (航空航天)",
+            "wiki (人文社科)",
+            "news (新闻资讯)",
+            "law (法律法规)",
+            "contract (合同)"
+        ])
+        self.translation_domain.setToolTip("选择专业领域以获得更准确的翻译结果")
+        self.translation_domain.setMinimumWidth(180)  # 设置最小宽度
+        self.translation_domain.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        # 直接在FormLayout中添加翻译配置，确保字体和对齐一致
+        baidu_layout.addRow("翻译类型:", self.translation_type)
+        
+        # 翻译领域行（保存引用以便控制显示隐藏）
+        self.translation_domain_label = QLabel("翻译领域:")
+        baidu_layout.addRow(self.translation_domain_label, self.translation_domain)
+        
+        # 保存领域行的索引以便控制显示隐藏
+        self.domain_row_index = baidu_layout.rowCount() - 1
+        
         baidu_group.setLayout(baidu_layout)
         
         # 使用垂直布局并添加拉伸
@@ -947,6 +987,9 @@ class SettingsDialog(QDialog):
         layout.addWidget(button_container)
         
         self.setLayout(layout)
+        
+        # 初始化翻译类型的可见性
+        self.onTranslationTypeChanged()
 
     def loadSettings(self):
         """加载设置"""
@@ -971,6 +1014,10 @@ class SettingsDialog(QDialog):
                     # 百度翻译API配置
                     self.baidu_appid.setText(settings.get('baidu_appid', default_configs['baidu_appid']))
                     self.baidu_appkey.setText(settings.get('baidu_appkey', default_configs['baidu_appkey']))
+                    self.translation_type.setCurrentText(settings.get('translation_type', '通用翻译'))
+                    self.translation_domain.setCurrentText(settings.get('translation_domain', 'it (信息技术)'))
+                    # 根据翻译类型设置领域的可见性
+                    self.onTranslationTypeChanged()
                     
                     # 加载语音设置
                     self.voice_speed.setValue(settings.get('voice_speed', 100))
@@ -1036,6 +1083,8 @@ class SettingsDialog(QDialog):
             # 百度翻译API配置
             'baidu_appid': self.baidu_appid.text(),
             'baidu_appkey': self.baidu_appkey.text(),
+            'translation_type': self.translation_type.currentText(),
+            'translation_domain': self.translation_domain.currentText(),
             # 语音设置
             'voice_speed': self.voice_speed.value(),
             'voice_volume': self.voice_volume.value(),
@@ -1174,6 +1223,15 @@ class SettingsDialog(QDialog):
             self.concurrent_count.setValue(1)
             self.log_level.setCurrentText("INFO")
 
+    def onTranslationTypeChanged(self):
+        """翻译类型切换时的回调"""
+        is_domain_translation = self.translation_type.currentText() == "领域翻译"
+        
+        # 控制翻译领域标签和控件的可见性
+        if hasattr(self, 'translation_domain_label') and hasattr(self, 'translation_domain'):
+            self.translation_domain_label.setVisible(is_domain_translation)
+            self.translation_domain.setVisible(is_domain_translation)
+
 class ProcessThread(QThread):
     """处理线程"""
     progress = pyqtSignal(int, str) # NEW: 进度信号同时传递文本
@@ -1196,6 +1254,36 @@ class ProcessThread(QThread):
         # 初始化路径管理器和文件操作助手 - 传递视频文件名以生成唯一前缀
         self.path_manager = SubtitlePathManager(save_path, video_path)
         self.file_helper = FileOperationHelper()
+    
+    def get_ffmpeg_path(self):
+        """获取FFmpeg路径，优先使用内置版本"""
+        # 检查当前目录下的ffmpeg文件夹
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        ffmpeg_local = os.path.join(current_dir, 'ffmpeg', 'bin', 'ffmpeg.exe')
+        
+        if os.path.exists(ffmpeg_local):
+            print(f"✅ 使用内置FFmpeg: {ffmpeg_local}")
+            return ffmpeg_local
+        
+        # 检查ffmpeg文件夹（相对路径）
+        ffmpeg_relative = os.path.join(current_dir, 'ffmpeg.exe')
+        if os.path.exists(ffmpeg_relative):
+            print(f"✅ 使用相对路径FFmpeg: {ffmpeg_relative}")
+            return ffmpeg_relative
+        
+        # 如果内置版本不存在，尝试系统PATH中的ffmpeg
+        try:
+            result = subprocess.run(['where', 'ffmpeg'], capture_output=True, text=True, shell=True)
+            if result.returncode == 0:
+                system_ffmpeg = result.stdout.strip().split('\n')[0]
+                print(f"⚠️ 使用系统FFmpeg: {system_ffmpeg}")
+                return system_ffmpeg
+        except Exception:
+            pass
+        
+        # 如果都找不到，返回默认名称（可能会失败，但会给出明确错误信息）
+        print(f"❌ 未找到FFmpeg，将尝试使用默认名称")
+        return 'ffmpeg'
     
     def detectLanguage(self, text):
         """检测文本语言（改进版）- 更准确的中英文识别"""
@@ -1543,8 +1631,20 @@ class ProcessThread(QThread):
     def translateToZh(self, text):
         """翻译为中文"""
         try:
-            import Baidu_Text_transAPI
-            result = Baidu_Text_transAPI.translate(text, 'en', 'zh')
+            # 获取当前的翻译配置
+            config = self.voice_params if hasattr(self, 'voice_params') and self.voice_params else {}
+            translation_type = config.get('translation_type', '通用翻译')
+            translation_domain = config.get('translation_domain', 'it (信息技术)')
+            
+            if translation_type == "领域翻译":
+                # 提取领域代码（如 "it (信息技术)" -> "it"）
+                domain = translation_domain.split(' ')[0]
+                result = self.domainTranslate(text, 'en', 'zh', domain)
+            else:
+                # 通用翻译
+                import Baidu_Text_transAPI
+                result = Baidu_Text_transAPI.translate(text, 'en', 'zh')
+            
             return result if result else text
         except Exception as e:
             print(f"翻译失败: {e}")
@@ -1553,12 +1653,77 @@ class ProcessThread(QThread):
     def translateToEn(self, text):
         """翻译为英文"""
         try:
-            import Baidu_Text_transAPI
-            result = Baidu_Text_transAPI.translate(text, 'zh', 'en')
+            # 获取当前的翻译配置
+            config = self.voice_params if hasattr(self, 'voice_params') and self.voice_params else {}
+            translation_type = config.get('translation_type', '通用翻译')
+            translation_domain = config.get('translation_domain', 'it (信息技术)')
+            
+            if translation_type == "领域翻译":
+                # 提取领域代码（如 "it (信息技术)" -> "it"）
+                domain = translation_domain.split(' ')[0]
+                result = self.domainTranslate(text, 'zh', 'en', domain)
+            else:
+                # 通用翻译
+                import Baidu_Text_transAPI
+                result = Baidu_Text_transAPI.translate(text, 'zh', 'en')
+            
             return result if result else text
         except Exception as e:
             print(f"翻译失败: {e}")
             return text
+    
+    def domainTranslate(self, text, from_lang, to_lang, domain):
+        """百度领域翻译API"""
+        try:
+            import http.client
+            import hashlib
+            import urllib
+            import random
+            import json
+            
+            # 获取配置
+            config = self.voice_params if hasattr(self, 'voice_params') and self.voice_params else {}
+            appid = config.get('baidu_appid', '')
+            secret_key = config.get('baidu_appkey', '')
+            
+            if not appid or not secret_key:
+                print("百度翻译API配置不完整，使用通用翻译")
+                import Baidu_Text_transAPI
+                return Baidu_Text_transAPI.translate(text, from_lang, to_lang)
+            
+            # 构建领域翻译请求参数
+            salt = random.randint(32768, 65536)
+            sign = appid + text + str(salt) + domain + secret_key
+            sign = hashlib.md5(sign.encode()).hexdigest()
+            
+            myurl = '/api/trans/vip/fieldtranslate'
+            myurl = myurl + '?appid=' + appid + '&q=' + urllib.parse.quote(text) + \
+                    '&from=' + from_lang + '&to=' + to_lang + '&salt=' + str(salt) + \
+                    '&domain=' + domain + '&sign=' + sign
+            
+            # 发送请求
+            httpClient = http.client.HTTPConnection('api.fanyi.baidu.com')
+            httpClient.request('GET', myurl)
+            response = httpClient.getresponse()
+            result_all = response.read().decode("utf-8")
+            result = json.loads(result_all)
+            httpClient.close()
+            
+            # 解析结果
+            if 'trans_result' in result:
+                return result['trans_result'][0]['dst']
+            else:
+                print(f"领域翻译失败: {result}")
+                return text
+                
+        except Exception as e:
+            print(f"领域翻译异常: {e}")
+            # 失败时回退到通用翻译
+            try:
+                import Baidu_Text_transAPI
+                return Baidu_Text_transAPI.translate(text, from_lang, to_lang)
+            except:
+                return text
 
     def embedSubtitles(self, video_file, original_subtitle_file, converted_subtitle_file=None, conversion_type="英文转英文", subtitle_mode="硬字幕（烧录到视频）"):
         """
@@ -1573,8 +1738,9 @@ class ProcessThread(QThread):
         
         print(f"🎬 字幕嵌入模式: {subtitle_mode}")
         
-        # 检查ffmpeg是否在系统路径中可用
-        if not shutil.which('ffmpeg'):
+        # 检查FFmpeg是否可用
+        ffmpeg_path = self.get_ffmpeg_path()
+        if ffmpeg_path == 'ffmpeg' and not shutil.which('ffmpeg'):
             print("致命错误: 在系统路径中找不到 ffmpeg。请确保已正确安装并配置环境变量。")
             return False
         
@@ -1622,8 +1788,9 @@ class ProcessThread(QThread):
         print(f"   输出文件: {output_with_subs}")
         
         # FFmpeg命令：将字幕作为独立流嵌入
+        ffmpeg_path = self.get_ffmpeg_path()
         cmd = [
-            'ffmpeg', '-y',
+            ffmpeg_path, '-y',
             '-i', video_file,
             '-i', subtitle_file,
             '-c:v', 'copy',  # 视频流不重编码
@@ -1807,41 +1974,34 @@ class ProcessThread(QThread):
                 # Linux/Mac路径处理：转义冒号和反斜杠
                 filter_path = working_subtitle_path.replace('\\', '\\\\').replace(':', '\\:')
             
-            # 使用简化的字幕嵌入方法，避免复杂的路径转义
-            # 方法1：尝试标准的subtitles滤镜（硬字幕嵌入）
-            try:
-                vf_filter = f"subtitles='{working_subtitle_path}':force_style='FontSize=22,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2'"
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-i', video_file,
-                    '-vf', vf_filter,
-                    '-c:a', 'copy',
-                    '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    '-crf', '23',
-                    output_with_subs
-                ]
-                
-                print(f"🎬 尝试标准字幕嵌入方法（硬字幕烧录）")
-                print(f"   完整命令: {' '.join(cmd)}")
-                
-            except Exception as e:
-                print(f"⚠️ 标准方法构建失败: {e}")
-                
-                # 方法2：备用的简单方法
-                vf_filter = f"subtitles={working_subtitle_path}"
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-i', video_file,
-                    '-vf', vf_filter,
-                    '-c:a', 'copy',
-                    '-c:v', 'libx264',
-                    '-preset', 'fast',
-                    output_with_subs
-                ]
-                
-                print(f"🎬 使用备用简单字幕嵌入方法")
-                print(f"   完整命令: {' '.join(cmd)}")
+            # Windows下FFmpeg字幕嵌入命令构建
+            print(f"🎬 构建FFmpeg字幕嵌入命令")
+            
+            # Windows下的路径处理：将反斜杠替换为正斜杠，并转义冒号
+            filter_path = working_subtitle_path.replace('\\', '/').replace(':', '\\:')
+            
+            # 构建字幕滤镜，使用简单的样式设置
+            vf_filter = f"subtitles='{filter_path}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Bold=1'"
+            
+            # 检查FFmpeg是否存在
+            ffmpeg_path = self.get_ffmpeg_path()
+            
+            cmd = [
+                ffmpeg_path, '-y',
+                '-i', video_file,
+                '-vf', vf_filter,
+                '-c:a', 'copy',
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                output_with_subs
+            ]
+            
+            print(f"✅ 字幕嵌入命令构建成功")
+            print(f"   FFmpeg路径: {ffmpeg_path}")
+            print(f"   滤镜路径: {filter_path}")
+            print(f"   滤镜字符串: {vf_filter}")
+            print(f"   完整命令: {' '.join(cmd)}")
             
             # FFmpeg执行前的最终检查
             print(f"🔍 FFmpeg执行前最终检查:")
@@ -1875,12 +2035,23 @@ class ProcessThread(QThread):
             
             # 执行命令并提供清晰的错误反馈
             try:
+                print(f"🚀 正在执行FFmpeg命令...")
                 result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
+                
+                # 立即输出FFmpeg的执行结果，无论成功失败
+                print(f"📊 FFmpeg执行完成，返回码: {result.returncode}")
+                if result.stdout:
+                    print(f"📝 FFmpeg标准输出:\n{result.stdout}")
+                if result.stderr:
+                    print(f"📝 FFmpeg错误输出:\n{result.stderr}")
+                    
             except subprocess.TimeoutExpired:
                 print(f"❌ FFmpeg执行超时（10分钟）")
                 return False
             except Exception as e:
                 print(f"❌ FFmpeg执行异常: {e}")
+                import traceback
+                traceback.print_exc()
                 return False
 
             # 清理临时字幕文件
@@ -1891,30 +2062,59 @@ class ProcessThread(QThread):
                 except Exception as e:
                     print(f"⚠️ 清理临时字幕文件失败: {e}")
 
+            # 检查执行结果
+            print(f"🔍 检查FFmpeg执行结果:")
+            print(f"   - 返回码: {result.returncode}")
+            print(f"   - 输出文件存在: {os.path.exists(output_with_subs) if 'output_with_subs' in locals() else 'N/A'}")
+            print(f"   - 输出文件大小: {os.path.getsize(output_with_subs) if os.path.exists(output_with_subs) else 0} 字节")
+
             if result.returncode == 0 and os.path.exists(output_with_subs) and os.path.getsize(output_with_subs) > 0:
                 print(f"✅ 字幕嵌入成功，临时文件为: {output_with_subs}")
                 # 用带字幕的视频替换原文件
-                os.replace(output_with_subs, video_file)
-                print(f"✅ 最终文件已更新: {video_file}")
+                try:
+                    os.replace(output_with_subs, video_file)
+                    print(f"✅ 最终文件已更新: {video_file}")
+                except Exception as e:
+                    print(f"❌ 替换原文件失败: {e}")
+                    return False
                 
                 # 清理临时双语字幕文件
                 if need_bilingual and 'bilingual_subtitle' in locals() and os.path.exists(bilingual_subtitle):
-                    os.remove(bilingual_subtitle)
-                    print("✅ 临时双语字幕文件已清理")
+                    try:
+                        os.remove(bilingual_subtitle)
+                        print("✅ 临时双语字幕文件已清理")
+                    except Exception as e:
+                        print(f"⚠️ 清理临时双语字幕失败: {e}")
                 
                 return True
             else:
-                # 关键：打印出ffmpeg的具体错误信息用于诊断
+                # 详细的失败分析
                 print("❌ 字幕嵌入失败!")
-                print(f"❌ FFmpeg 返回码: {result.returncode}")
-                print(f"❌ FFmpeg 错误日志:\n{result.stderr}")
-                print(f"❌ FFmpeg 标准输出:\n{result.stdout}")
+                print(f"   返回码: {result.returncode}")
                 
-                # 检查常见问题
-                if "No such file or directory" in result.stderr:
-                    print("🔍 可能原因：文件路径有问题")
-                if "Invalid argument" in result.stderr:
-                    print("🔍 可能原因：字幕文件格式或字符编码有问题")
+                # 分析具体原因
+                if result.returncode != 0:
+                    print(f"❌ FFmpeg执行失败，返回码: {result.returncode}")
+                    
+                    # 常见错误分析
+                    error_msg = result.stderr.lower() if result.stderr else ""
+                    if "no such file or directory" in error_msg:
+                        print("🔍 原因分析：文件路径问题")
+                    elif "invalid argument" in error_msg:
+                        print("🔍 原因分析：命令参数无效")
+                    elif "permission denied" in error_msg:
+                        print("🔍 原因分析：文件权限问题")
+                    elif "codec" in error_msg:
+                        print("🔍 原因分析：编解码器问题")
+                    elif "format" in error_msg:
+                        print("🔍 原因分析：文件格式问题")
+                    else:
+                        print("🔍 原因分析：未知错误，请检查FFmpeg安装")
+                
+                if not os.path.exists(output_with_subs):
+                    print(f"❌ 输出文件未生成: {output_with_subs}")
+                elif os.path.getsize(output_with_subs) == 0:
+                    print(f"❌ 输出文件为空: {output_with_subs}")
                 
                 return False
                 
@@ -3109,72 +3309,8 @@ class EnhancedMainWindow(QMainWindow):
         button_layout.setSpacing(8)  # 增加按钮间距
         button_layout.setContentsMargins(5, 5, 5, 5)  # 增加边距
         
-        # 打开文件夹按钮
-        self.open_result_btn = QPushButton("打开文件夹")
-        self.open_result_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
-        self.open_result_btn.setToolTip("打开输出文件夹")
-        self.open_result_btn.setFixedHeight(28)  # 适当增加按钮高度
-        self.open_result_btn.setMinimumWidth(85)  # 适当增加按钮宽度
-        self.open_result_btn.setStyleSheet("""
-            QPushButton {
-                font-weight: bold;
-                border: 1px solid #0078D7;
-                border-radius: 5px;
-                padding: 5px 10px;
-                font-size: 10px;
-                background-color: white;
-                color: #0078D7;
-            }
-            QPushButton:hover {
-                background-color: #0078D7;
-                color: white;
-            }
-            QPushButton:disabled {
-                background-color: #f0f0f0;
-                color: #999;
-                border-color: #ddd;
-            }
-        """)
-        
-        # 播放视频按钮
-        self.play_result_btn = QPushButton("播放视频")
-        self.play_result_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.play_result_btn.setToolTip("播放处理后的视频")
-        self.play_result_btn.setFixedHeight(28)  # 与打开文件夹按钮保持一致高度
-        self.play_result_btn.setMinimumWidth(85)  # 与打开文件夹按钮保持一致宽度
-        self.play_result_btn.setStyleSheet("""
-            QPushButton {
-                font-weight: bold;
-                border: 1px solid #28a745;
-                border-radius: 5px;
-                padding: 5px 10px;
-                font-size: 10px;
-                background-color: white;
-                color: #28a745;
-            }
-            QPushButton:hover {
-                background-color: #28a745;
-                color: white;
-            }
-            QPushButton:disabled {
-                background-color: #f0f0f0;
-                color: #999;
-                border-color: #ddd;
-            }
-        """)
-        
-        # 初始状态禁用按钮
-        self.open_result_btn.setEnabled(False)
-        self.play_result_btn.setEnabled(False)
-        
-        # 连接按钮事件
-        self.open_result_btn.clicked.connect(self.openResultFolder)
-        self.play_result_btn.clicked.connect(self.playResultVideo)
-        
-        # 按钮布局
-        button_layout.addWidget(self.open_result_btn)
-        button_layout.addWidget(self.play_result_btn)
-        button_layout.addStretch()  # 右侧弹性空间
+        # 不添加任何按钮，只保留弹性空间
+        button_layout.addStretch()  # 弹性空间
         
         # 组装主布局
         layout.addWidget(self.result_scroll_area, 1)  # 滚动区域占主要空间
@@ -4006,6 +4142,26 @@ class EnhancedMainWindow(QMainWindow):
             'subtitle_mode': subtitle_mode
         }
         
+        # 添加翻译配置
+        try:
+            import json
+            with open('config.json', 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            voice_params.update({
+                'translation_type': config.get('translation_type', '通用翻译'),
+                'translation_domain': config.get('translation_domain', 'it (信息技术)'),
+                'baidu_appid': config.get('baidu_appid', ''),
+                'baidu_appkey': config.get('baidu_appkey', '')
+            })
+        except Exception as e:
+            print(f"读取翻译配置失败: {e}")
+            voice_params.update({
+                'translation_type': '通用翻译',
+                'translation_domain': 'it (信息技术)',
+                'baidu_appid': '',
+                'baidu_appkey': ''
+            })
+        
         self.process_thread = ProcessThread(self.video_path, self.output_path, conversion_type, voice_params)
         self.process_thread.progress.connect(self.update_progress)
         self.process_thread.finished.connect(self.on_process_finished)
@@ -4233,8 +4389,7 @@ class EnhancedMainWindow(QMainWindow):
             self.updateResultDisplay(result_text, "success")
             
             # 启用结果操作按钮
-            self.open_result_btn.setEnabled(True)
-            self.play_result_btn.setEnabled(True)
+            # 按钮已删除，无需启用
             
             QMessageBox.information(self, "处理完成", f"视频处理成功完成！\n\n输出文件：{os.path.basename(message)}")
             self.status_label.setText("处理完成")
@@ -4262,7 +4417,8 @@ class EnhancedMainWindow(QMainWindow):
         
         self.file_input_widget.setEnabled(enabled)
         self.conversion_combo.setEnabled(enabled)
-        self.voice_combo.setEnabled(enabled)
+        self.voice_combo_cn.setEnabled(enabled)
+        self.voice_combo_en.setEnabled(enabled)
         self.speed_slider.setEnabled(enabled)
         self.volume_slider.setEnabled(enabled)
         self.quality_combo.setEnabled(enabled)

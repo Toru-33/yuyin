@@ -8,8 +8,8 @@ import urllib
 import random
 import json
 
-appid = ''  # 填写你的appid
-secretKey = ''  # 填写你的密钥
+appid = '20210824000925614'  # 填写你的appid
+secretKey = 'a0aYBPzeAUqYv6xJMjyY'  # 填写你的密钥
 
 httpClient = None
 myurl = '/api/trans/vip/fieldtranslate'

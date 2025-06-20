@@ -375,6 +375,34 @@ class MiddleSettingsDialog(QDialog):
         
         baidu_layout.addRow("APPID:", self.baidu_appid)
         baidu_layout.addRow("AppKey:", self.baidu_appkey)
+        
+        # 翻译类型选择
+        self.translation_type = QComboBox()
+        self.translation_type.setStyleSheet("QComboBox { padding: 4px; font-size: 11px; }")
+        self.translation_type.addItems(["通用翻译", "领域翻译"])
+        self.translation_type.setToolTip("选择使用通用翻译API还是垂直领域翻译API")
+        self.translation_type.currentTextChanged.connect(self.onTranslationTypeChanged)
+        baidu_layout.addRow("翻译类型:", self.translation_type)
+        
+        # 领域选择
+        self.translation_domain = QComboBox()
+        self.translation_domain.setStyleSheet("QComboBox { padding: 4px; font-size: 11px; }")
+        self.translation_domain.addItems([
+            "it (信息技术)",
+            "finance (金融)",
+            "machinery (机械)",
+            "senimed (生物医学)",
+            "novel (网络文学)",
+            "academic (学术论文)",
+            "aerospace (航空航天)",
+            "wiki (人文社科)",
+            "news (新闻资讯)",
+            "law (法律法规)",
+            "contract (合同)"
+        ])
+        self.translation_domain.setToolTip("选择专业领域以获得更准确的翻译结果")
+        baidu_layout.addRow("翻译领域:", self.translation_domain)
+        
         baidu_group.setLayout(baidu_layout)
         
         api_layout.addWidget(stt_group)
@@ -555,6 +583,9 @@ class MiddleSettingsDialog(QDialog):
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+        
+        # 初始化翻译类型的可见性
+        self.onTranslationTypeChanged()
     
     def loadSettings(self):
         """加载设置"""
@@ -574,6 +605,12 @@ class MiddleSettingsDialog(QDialog):
                 
                 self.baidu_appid.setText(config.get('baidu_appid', ''))
                 self.baidu_appkey.setText(config.get('baidu_appkey', ''))
+                
+                # 翻译类型和领域配置
+                self.translation_type.setCurrentText(config.get('translation_type', '通用翻译'))
+                self.translation_domain.setCurrentText(config.get('translation_domain', 'it (信息技术)'))
+                # 根据翻译类型设置领域的可见性
+                self.onTranslationTypeChanged()
                 
                 # 语音设置
                 self.voice_speed.setValue(config.get('voice_speed', 100))
@@ -603,6 +640,8 @@ class MiddleSettingsDialog(QDialog):
                 'xunfei_tts_apisecret': self.xunfei_tts_apisecret.text(),
                 'baidu_appid': self.baidu_appid.text(),
                 'baidu_appkey': self.baidu_appkey.text(),
+                'translation_type': self.translation_type.currentText(),
+                'translation_domain': self.translation_domain.currentText(),
                 'voice_speed': self.voice_speed.value(),
                 'voice_volume': self.voice_volume.value(),
                 'voice_type': self.voice_type_cn.currentText().split(' ')[0],
@@ -666,6 +705,22 @@ class MiddleSettingsDialog(QDialog):
                 QMessageBox.information(self, "成功", "设置已重置为默认值！")
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"重置失败: {e}") 
+
+    def onTranslationTypeChanged(self):
+        """翻译类型切换时的回调"""
+        is_domain_translation = self.translation_type.currentText() == "领域翻译"
+        
+        # 获取翻译领域的行索引
+        baidu_layout = self.translation_domain.parent().layout()
+        for i in range(baidu_layout.rowCount()):
+            item = baidu_layout.itemAt(i, QFormLayout.LabelRole)
+            if item and item.widget() and item.widget().text() == "翻译领域:":
+                # 显示/隐藏翻译领域标签和控件
+                item.widget().setVisible(is_domain_translation)
+                field_item = baidu_layout.itemAt(i, QFormLayout.FieldRole)
+                if field_item and field_item.widget():
+                    field_item.widget().setVisible(is_domain_translation)
+                break
 
 # --- 简化的处理线程 ---
 class MiddleProcessThread(QThread):
@@ -1406,6 +1461,14 @@ class MiddleMainWindow(QMainWindow):
             'voice_type': voice_type,
             'voice_type_cn': voice_type_cn,
             'voice_type_en': voice_type_en
+        })
+        
+        # 添加翻译配置
+        current_config.update({
+            'translation_type': current_config.get('translation_type', '通用翻译'),
+            'translation_domain': current_config.get('translation_domain', 'it (信息技术)'),
+            'baidu_appid': current_config.get('baidu_appid', ''),
+            'baidu_appkey': current_config.get('baidu_appkey', '')
         })
         
         # 提取输出目录路径

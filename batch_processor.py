@@ -302,17 +302,8 @@ class BatchProcessThread(QThread):
             if not wav_path or not os.path.exists(wav_path):
                 return False, "音频提取失败 - 请检查视频文件是否包含音频轨道"
             
-            # 2. 生成无声视频
-            self.step_progress.emit("步骤 2/5", f"正在生成无声视频: {file_name}")
-            import addNewSound
-            
-            video_filename = f'{clean_name}_videoWithoutAudio.mp4'
-            video_without_sound = addNewSound.del_audio(video_file, file_output_dir, video_filename)
-            if not video_without_sound or not os.path.exists(video_without_sound):
-                return False, "无声视频生成失败 - 请检查视频文件格式"
-            
-            # 3. 语音识别
-            self.step_progress.emit("步骤 3/5", f"正在识别语音，需要较长时间...")
+            # 2. 语音识别
+            self.step_progress.emit("步骤 2/3", f"正在识别语音，需要较长时间...")
             import video_to_txt
             
             subtitle_filename = f'{clean_name}_subtitle.srt'
@@ -330,8 +321,8 @@ class BatchProcessThread(QThread):
             except Exception as e:
                 print(f"读取字幕文件失败: {e}")
             
-            # 4. 智能转换逻辑
-            self.step_progress.emit("步骤 4/5", f"正在分析语言并准备转换: {conversion_type}")
+            # 3. 语音合成（包含智能转换和翻译处理）
+            self.step_progress.emit("步骤 3/3", f"正在分析语言并进行语音合成: {conversion_type}")
             actual_conversion_type = conversion_type
             if conversion_type == "智能转换":
                 # 检测语言
@@ -359,10 +350,9 @@ class BatchProcessThread(QThread):
                     voice_params['voice_type'] = voice_type
                     print(f"🧠 智能转换：检测到 {detected_lang} -> {actual_conversion_type}，选择发音人：{voice_type}")
                 
-                self.step_progress.emit("步骤 4/5", f"智能检测为: {detected_lang} -> {actual_conversion_type}，发音人：{voice_params.get('voice_type', 'xiaoyan')}")
+                self.step_progress.emit("步骤 3/3", f"智能检测为: {detected_lang} -> {actual_conversion_type}，发音人：{voice_params.get('voice_type', 'xiaoyan')}")
             
-            # 5. 语音合成
-            self.step_progress.emit("步骤 5/5", f"正在进行语音合成: {actual_conversion_type}")
+            # 语音合成
             type_map = {
                 "智能转换": "smart",
                 "中文转英文": "cn_to_en", 
@@ -372,8 +362,14 @@ class BatchProcessThread(QThread):
             }
             conversion_suffix = type_map.get(actual_conversion_type, 'new')
             
-            name, ext = os.path.splitext(base_name)
-            final_video_path = os.path.join(file_output_dir, f"{name}_{conversion_suffix}{ext}")
+            # 修复：确保输出文件有正确的扩展名
+            original_filename = os.path.basename(video_file)
+            original_name, original_ext = os.path.splitext(original_filename)
+            if not original_ext:
+                original_ext = '.mp4'  # 默认使用mp4格式
+            final_video_path = os.path.join(file_output_dir, f"{original_name}_{conversion_suffix}{original_ext}")
+            
+            print(f"📁 输出文件路径: {final_video_path}")
             
             # 获取语音参数
             voice_type = voice_params.get('voice_type', 'xiaoyan')
@@ -381,6 +377,15 @@ class BatchProcessThread(QThread):
             volume = voice_params.get('volume', 80)
             
             print(f"使用语音参数: 发音人={voice_type}, 语速={speed}%, 音量={volume}%")
+            
+            # 路径一致性检查
+            print(f"📁 路径检查:")
+            print(f"   视频文件: {video_file}")
+            print(f"   输出目录: {file_output_dir}")
+            print(f"   音频文件: {wav_path}")
+            print(f"   字幕文件: {subtitle_file}")
+            print(f"   最终视频: {final_video_path}")
+            print(f"   所有路径存在性检查: 音频={os.path.exists(wav_path)}, 字幕={os.path.exists(subtitle_file)}")
             
             # 使用统一语音合成模块
             generated_video_path = None
@@ -390,22 +395,77 @@ class BatchProcessThread(QThread):
                 synthesis = UnifiedSpeechSynthesis()
                 
                 def progress_callback(progress, message):
-                    self.step_progress.emit("步骤 5/5", f"{message} ({progress}%)")
+                    self.step_progress.emit("步骤 3/3", f"{message} ({progress}%)")
+                
+                print(f"🔧 调用unified_speech_synthesis.process_video:")
+                print(f"   video_file: {video_file}")
+                print(f"   subtitle_file: {subtitle_file}")
+                print(f"   output_path: {final_video_path}")
+                print(f"   existing_audio_path: {wav_path}")
                 
                 generated_video_path = synthesis.process_video(
                     video_file=video_file,
-                    video_without_audio=video_without_sound,
                     subtitle_file=subtitle_file,
                     output_path=final_video_path,
                     conversion_type=actual_conversion_type,
                     voice_type=voice_type,
                     speed=speed,
                     volume=volume,
-                    progress_callback=progress_callback
+                    progress_callback=progress_callback,
+                    existing_audio_path=wav_path  # 传递已提取的音频路径，避免重复提取
                 )
+                
+                # 如果需要翻译，尝试获取转换后字幕
+                if generated_video_path and actual_conversion_type in ["中文转英文", "英文转中文"]:
+                    # 查找unified_speech_synthesis可能生成的转换后字幕文件
+                    base_name = os.path.splitext(os.path.basename(subtitle_file))[0]
+                    possible_translated_files = [
+                        os.path.join(os.path.dirname(subtitle_file), f"{base_name}_translated.srt"),
+                        os.path.join(file_output_dir, f"{clean_name}_translated.srt"),
+                        os.path.join(file_output_dir, "translated.srt")
+                    ]
+                    
+                    translated_found = False
+                    for translated_file in possible_translated_files:
+                        if os.path.exists(translated_file):
+                            try:
+                                with open(translated_file, 'r', encoding='utf-8') as f:
+                                    translated_content = f.read()
+                                self.subtitle_generated.emit(video_file, "converted", translated_content)
+                                print(f"✅ 找到并发送转换后字幕: {translated_file}")
+                                translated_found = True
+                                break
+                            except Exception as e:
+                                print(f"读取转换后字幕失败: {e}")
+                    
+                    # 如果没有找到，手动生成转换后字幕作为备用
+                    if not translated_found:
+                        try:
+                            self.step_progress.emit("步骤 3/3", "生成转换后字幕...")
+                            translated_content = self._translate_subtitle_content(
+                                subtitle_content, actual_conversion_type
+                            )
+                            self.subtitle_generated.emit(video_file, "converted", translated_content)
+                            print(f"✅ 手动生成并发送转换后字幕")
+                        except Exception as e:
+                            print(f"手动生成转换后字幕失败: {e}")
+                
             except Exception as e:
                 error_msg = f"语音合成失败: {str(e)}"
                 self.step_progress.emit("错误", error_msg)
+                
+                # 即使处理失败，也尝试发送转换后字幕
+                if actual_conversion_type in ["中文转英文", "英文转中文"]:
+                    try:
+                        self.step_progress.emit("步骤 3/3", "处理失败但尝试生成转换后字幕...")
+                        translated_content = self._translate_subtitle_content(
+                            subtitle_content, actual_conversion_type
+                        )
+                        self.subtitle_generated.emit(video_file, "converted", translated_content)
+                        print(f"✅ 处理失败但成功生成并发送转换后字幕")
+                    except Exception as translate_error:
+                        print(f"生成转换后字幕也失败: {translate_error}")
+                
                 return False, error_msg
             
             # 验证输出文件
@@ -415,28 +475,6 @@ class BatchProcessThread(QThread):
                 file_size = os.path.getsize(final_output) / (1024 * 1024)
                 success_msg = f"处理成功 ({actual_conversion_type}) - {file_size:.1f}MB"
                 print(f"✅ {success_msg}: {final_output}")
-                
-                # 尝试发送处理后的字幕（如果有的话）
-                try:
-                    # 查找可能生成的转换后字幕文件
-                    subtitle_patterns = [
-                        os.path.join(file_output_dir, f"{clean_name}_translated.srt"),
-                        os.path.join(file_output_dir, f"{clean_name}_processed.srt"),
-                        os.path.join(file_output_dir, "translated.srt"),
-                        os.path.join(file_output_dir, "processed.srt")
-                    ]
-                    
-                    for processed_subtitle_file in subtitle_patterns:
-                        if os.path.exists(processed_subtitle_file):
-                            with open(processed_subtitle_file, 'r', encoding='utf-8') as f:
-                                processed_subtitle_content = f.read()
-                            self.subtitle_generated.emit(video_file, "translated", processed_subtitle_content)
-                            print(f"已发送转换后字幕: {len(processed_subtitle_content)} 字符")
-                            break
-                            
-                except Exception as e:
-                    print(f"读取转换后字幕失败: {e}")
-                
                 return True, success_msg
             else:
                 return False, f"输出文件未生成: {final_output}"
@@ -456,6 +494,63 @@ class BatchProcessThread(QThread):
     def stop_processing(self):
         """停止处理"""
         self.is_running = False
+
+    def _check_pause_state(self):
+        """检查暂停状态"""
+        while self.is_paused and self.is_running:
+            self.msleep(100)
+    
+    def _translate_subtitle_content(self, subtitle_content, conversion_type):
+        """翻译字幕内容"""
+        try:
+            # 导入翻译函数
+            from Baidu_Text_transAPI import translate
+            
+            # 解析字幕文件
+            import re
+            subtitle_pattern = r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n(.*?)(?=\n\d+\n|\n*$)'
+            matches = re.findall(subtitle_pattern, subtitle_content, re.DOTALL)
+            
+            if not matches:
+                return subtitle_content  # 如果解析失败，返回原内容
+            
+            # 确定翻译方向
+            if conversion_type == "中文转英文":
+                from_lang = 'zh'
+                to_lang = 'en'
+            elif conversion_type == "英文转中文":
+                from_lang = 'en' 
+                to_lang = 'zh'
+            else:
+                return subtitle_content  # 不需要翻译
+            
+            translated_lines = []
+            
+            for i, (index, start_time, end_time, text) in enumerate(matches):
+                # 清理文本
+                clean_text = text.strip().replace('\n', ' ')
+                
+                if clean_text:
+                    # 翻译文本
+                    try:
+                        translated_text = translate(clean_text, from_lang, to_lang)
+                        if not translated_text:
+                            translated_text = clean_text  # 翻译失败时保留原文
+                    except Exception as e:
+                        print(f"翻译第{i+1}行失败: {e}")
+                        translated_text = clean_text
+                else:
+                    translated_text = clean_text
+                
+                # 重构字幕条目
+                translated_entry = f"{index}\n{start_time} --> {end_time}\n{translated_text}\n"
+                translated_lines.append(translated_entry)
+            
+            return '\n'.join(translated_lines)
+            
+        except Exception as e:
+            print(f"翻译字幕内容失败: {e}")
+            return subtitle_content  # 出错时返回原内容
 
 class BatchProcessDialog(QDialog):
     """批量处理对话框"""
@@ -719,7 +814,6 @@ class BatchProcessDialog(QDialog):
             QPushButton:disabled {
                 background-color: #6c757d;
                 border-color: #6c757d;
-                color: white;
             }
         """)
         self.stop_btn.clicked.connect(self.stopBatchProcessing)

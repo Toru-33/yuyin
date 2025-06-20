@@ -1061,55 +1061,13 @@ class UnifiedSpeechSynthesis:
                         raise Exception(f"FFmpeg合并失败: {result.stderr}")
                         
                 except Exception as ffmpeg_error:
-                    print(f"⚠️ FFmpeg合并失败，尝试MoviePy方案: {ffmpeg_error}")
-                    
-                    # 备用方案：使用MoviePy
-                    video = VideoFileClip(video_file)
-                    new_audio = AudioSegment.from_wav(merged_audio_file)
-                    
-                    # 将AudioSegment转换为moviepy可用的音频
-                    temp_audio_file = get_temp_path("final_audio.wav")
-                    temp_files.append(temp_audio_file)
-                    new_audio.export(temp_audio_file, format="wav")
-                    
-                    from moviepy.editor import AudioFileClip
-                    new_audio_clip = AudioFileClip(temp_audio_file)
-                    
-                    print(f"📊 视频时长: {video.duration:.1f}s, 音频时长: {new_audio_clip.duration:.1f}s")
-                    
-                    # 确保音频时长匹配视频
-                    if new_audio_clip.duration > video.duration:
-                        print(f"🔧 裁剪音频: {new_audio_clip.duration:.1f}s -> {video.duration:.1f}s")
-                        new_audio_clip = new_audio_clip.subclip(0, video.duration)
-                    elif new_audio_clip.duration < video.duration:
-                        # 如果音频较短，在末尾添加静音
-                        silence_duration = video.duration - new_audio_clip.duration
-                        print(f"🔧 添加静音: {silence_duration:.1f}s")
-                        silence = AudioSegment.silent(duration=int(silence_duration * 1000))
-                        extended_audio = new_audio + silence
-                        extended_temp_file = get_temp_path("extended_audio.wav")
-                        temp_files.append(extended_temp_file)
-                        extended_audio.export(extended_temp_file, format="wav")
-                        new_audio_clip.close()
-                        new_audio_clip = AudioFileClip(extended_temp_file)
-                    
-                    final_video = video.set_audio(new_audio_clip)
-                    final_video.write_videofile(
-                        output_path, 
-                        codec='libx264', 
-                        audio_codec='aac',
-                        temp_audiofile=get_temp_path("temp_audio.m4a"),
-                        remove_temp=True,
-                        verbose=False, 
-                        logger=None
-                    )
-                    
-                    # 清理资源
-                    video.close()
-                    new_audio_clip.close()
-                    final_video.close()
-                    
-                    print(f"✅ MoviePy合并成功!")
+                    print(f"❌ FFmpeg合并失败: {ffmpeg_error}")
+                    # 保存音频文件到输出目录
+                    backup_audio = output_path.replace('.mp4', '_audio.wav')
+                    import shutil
+                    shutil.copy2(merged_audio_file, backup_audio)
+                    print(f"⚠️ 已保存音频文件: {backup_audio}")
+                    raise Exception(f"视频音频合并失败: {ffmpeg_error}")
                 
                 # 最终验证
                 if os.path.exists(output_path):
