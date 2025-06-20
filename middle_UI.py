@@ -830,14 +830,23 @@ class MiddleProcessThread(QThread):
                 synthesis.set_cache_enabled(cache_enabled)
                 
                 # 获取语音参数
-                voice_type = self.voice_params.get('voice_type', 'xiaoyan')
                 voice_speed = self.voice_params.get('voice_speed', 100)
                 voice_volume = self.voice_params.get('voice_volume', 80)
                 quality = self.voice_params.get('output_quality', '高质量')
                 
                 # 根据实际转换类型选择发音人
-                if actual_conversion_type in ["英文转英文", "中文转英文"]:
-                    voice_type = self.voice_params.get('voice_type_en', 'x4_EnUs_Laura_education')
+                if self.voice_params.get('voice_type') == "auto_detect":
+                    # 智能转换：根据检测到的实际转换类型选择发音人
+                    if actual_conversion_type in ["英文转英文", "中文转英文"]:
+                        voice_type = self.voice_params.get('voice_type_en', 'x4_EnUs_Laura_education')
+                    else:  # 中文转中文, 英文转中文
+                        voice_type = self.voice_params.get('voice_type_cn', 'xiaoyan')
+                else:
+                    # 固定转换类型：根据转换类型选择发音人
+                    if actual_conversion_type in ["英文转英文", "中文转英文"]:
+                        voice_type = self.voice_params.get('voice_type_en', 'x4_EnUs_Laura_education')
+                    else:  # 中文转中文, 英文转中文
+                        voice_type = self.voice_params.get('voice_type_cn', 'xiaoyan')
                 
                 # 处理视频
                 result = synthesis.process_video(
@@ -973,11 +982,29 @@ class MiddleMainWindow(QMainWindow):
             self.speed_slider.setValue(self.config.get('voice_speed', 100))
             self.volume_slider.setValue(self.config.get('voice_volume', 80))
             
-            # 发音人选择
-            voice_type = self.config.get('voice_type', 'xiaoyan')
-            voice_type_en = self.config.get('voice_type_en', 'x4_EnUs_Laura_education')
+            # 中文发音人设置
+            voice_type_cn = self.config.get('voice_type_cn', 'xiaoyan')
+            cn_items = [self.voice_combo_cn.itemText(i) for i in range(self.voice_combo_cn.count())]
+            cn_match = None
+            for item in cn_items:
+                if voice_type_cn in item:
+                    cn_match = item
+                    break
+            if cn_match:
+                self.voice_combo_cn.setCurrentText(cn_match)
             
-            # 根据当前转换类型设置发音人
+            # 英文发音人设置
+            voice_type_en = self.config.get('voice_type_en', 'x4_EnUs_Laura_education')
+            en_items = [self.voice_combo_en.itemText(i) for i in range(self.voice_combo_en.count())]
+            en_match = None
+            for item in en_items:
+                if voice_type_en in item:
+                    en_match = item
+                    break
+            if en_match:
+                self.voice_combo_en.setCurrentText(en_match)
+            
+            # 根据当前转换类型设置发音人显示
             self.updateVoiceTypeUI()
             
         except Exception as e:
@@ -1111,7 +1138,7 @@ class MiddleMainWindow(QMainWindow):
     def createConversionSection(self):
         """创建转换设置区域"""
         conversion_frame = QFrame()
-        conversion_frame.setMinimumHeight(85)  # 减小转换设置区域高度
+        conversion_frame.setMinimumHeight(110)  # 增加高度以适应两行发音人选择
         
         layout = QVBoxLayout(conversion_frame)
         layout.setSpacing(4)  # 减小间距
@@ -1139,17 +1166,40 @@ class MiddleMainWindow(QMainWindow):
         type_layout.addWidget(type_label)
         type_layout.addWidget(self.conversion_type, 1)
         
-        # 发音人选择
-        voice_layout = QHBoxLayout()
-        voice_layout.setSpacing(10)
-        voice_label = QLabel("发音人:")
-        voice_label.setFixedWidth(80)
+        # 中文发音人选择
+        voice_cn_layout = QHBoxLayout()
+        voice_cn_layout.setSpacing(10)
+        voice_cn_label = QLabel("中文发音人:")
+        voice_cn_label.setFixedWidth(80)
         
-        self.voice_selector = QComboBox()
-
+        self.voice_combo_cn = QComboBox()
+        self.voice_combo_cn.addItems([
+            "xiaoyan (女声·亲和)",
+            "aisjiuxu (男声·专业)", 
+            "aisxping (男声·成熟)",
+            "aisjinger (女声·温暖)",
+            "aisbabyxu (童声·可爱)"
+        ])
         
-        voice_layout.addWidget(voice_label)
-        voice_layout.addWidget(self.voice_selector, 1)
+        voice_cn_layout.addWidget(voice_cn_label)
+        voice_cn_layout.addWidget(self.voice_combo_cn, 1)
+        
+        # 英文发音人选择
+        voice_en_layout = QHBoxLayout()
+        voice_en_layout.setSpacing(10)
+        voice_en_label = QLabel("英文发音人:")
+        voice_en_label.setFixedWidth(80)
+        
+        self.voice_combo_en = QComboBox()
+        self.voice_combo_en.addItems([
+            "x4_EnUs_Laura_education (女声·教育)",
+            "x4_EnUs_Alex_education (男声·教育)",
+            "x4_EnUs_Emma_formal (女声·正式)",
+            "x4_EnUs_Chris_formal (男声·正式)"
+        ])
+        
+        voice_en_layout.addWidget(voice_en_label)
+        voice_en_layout.addWidget(self.voice_combo_en, 1)
         
         # 语音参数设置
         params_layout = QGridLayout()
@@ -1173,7 +1223,8 @@ class MiddleMainWindow(QMainWindow):
         
         layout.addWidget(title_label)
         layout.addLayout(type_layout)
-        layout.addLayout(voice_layout)
+        layout.addLayout(voice_cn_layout)
+        layout.addLayout(voice_en_layout)
         layout.addLayout(params_layout)
         
         return conversion_frame
@@ -1281,37 +1332,39 @@ class MiddleMainWindow(QMainWindow):
         return result_frame
 
     def updateVoiceTypeUI(self):
-        """更新发音人选择"""
+        """更新发音人选择显示"""
         selected_type = self.conversion_type.currentText()
-        if selected_type in ["英文转英文", "中文转英文"]:
-            self.voice_selector.clear()
-            self.voice_selector.addItems([
-                "x4_EnUs_Laura_education",
-                "x4_EnUs_Alex_education",
-                "x4_EnUs_Emma_formal",
-                "x4_EnUs_Chris_formal"
-            ])
-            self.voice_selector.setCurrentText(self.config.get('voice_type_en', 'x4_EnUs_Laura_education'))
-        elif selected_type == "智能转换":
-            # 智能转换模式，显示中英文发音人选择
-            self.voice_selector.clear()
-            self.voice_selector.addItems([
-                "xiaoyan (中文女声)",
-                "aisjiuxu (中文男声)",
-                "x4_EnUs_Laura_education (英文女声)",
-                "x4_EnUs_Alex_education (英文男声)"
-            ])
-            self.voice_selector.setCurrentText(self.config.get('voice_type', 'xiaoyan (中文女声)'))
-        else:
-            self.voice_selector.clear()
-            self.voice_selector.addItems([
-                "xiaoyan",
-                "aisjiuxu",
-                "aisxping",
-                "aisjinger",
-                "aisbabyxu"
-            ])
-            self.voice_selector.setCurrentText(self.config.get('voice_type', 'xiaoyan'))
+        
+        # 获取布局中的发音人控件
+        voice_cn_widgets = [self.voice_combo_cn.parent().layout().itemAt(i).widget() 
+                           for i in range(self.voice_combo_cn.parent().layout().count())]
+        voice_en_widgets = [self.voice_combo_en.parent().layout().itemAt(i).widget() 
+                           for i in range(self.voice_combo_en.parent().layout().count())]
+        
+        if selected_type == "智能转换":
+            # 智能转换：显示中英文发音人
+            for widget in voice_cn_widgets:
+                if widget:
+                    widget.setVisible(True)
+            for widget in voice_en_widgets:
+                if widget:
+                    widget.setVisible(True)
+        elif selected_type in ["中文转英文", "英文转英文"]:
+            # 输出英文：只显示英文发音人
+            for widget in voice_cn_widgets:
+                if widget:
+                    widget.setVisible(False)
+            for widget in voice_en_widgets:
+                if widget:
+                    widget.setVisible(True)
+        else:  # 中文转中文, 英文转中文
+            # 输出中文：只显示中文发音人
+            for widget in voice_cn_widgets:
+                if widget:
+                    widget.setVisible(True)
+            for widget in voice_en_widgets:
+                if widget:
+                    widget.setVisible(False)
 
     def startProcessing(self):
         """开始处理"""
@@ -1333,11 +1386,26 @@ class MiddleMainWindow(QMainWindow):
         
         # 获取当前配置
         current_config = self.config.copy()
+        
+        # 获取发音人选择
+        voice_type_cn = self.voice_combo_cn.currentText().split(' (')[0]  # 提取实际的voice名称
+        voice_type_en = self.voice_combo_en.currentText().split(' (')[0]  # 提取实际的voice名称
+        
+        # 根据转换类型决定使用哪个发音人
+        conversion_type = self.conversion_type.currentText()
+        if conversion_type == "智能转换":
+            voice_type = "auto_detect"  # 智能转换的特殊标记
+        elif conversion_type in ["中文转英文", "英文转英文"]:
+            voice_type = voice_type_en
+        else:  # 中文转中文, 英文转中文
+            voice_type = voice_type_cn
+        
         current_config.update({
             'voice_speed': self.speed_slider.value(),
             'voice_volume': self.volume_slider.value(),
-            'voice_type': self.voice_selector.currentText() if self.conversion_type.currentText() not in ["英文转英文", "中文转英文"] else self.config.get('voice_type', 'xiaoyan'),
-            'voice_type_en': self.voice_selector.currentText() if self.conversion_type.currentText() in ["英文转英文", "中文转英文"] else self.config.get('voice_type_en', 'x4_EnUs_Laura_education')
+            'voice_type': voice_type,
+            'voice_type_cn': voice_type_cn,
+            'voice_type_en': voice_type_en
         })
         
         # 提取输出目录路径

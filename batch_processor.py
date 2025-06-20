@@ -346,7 +346,20 @@ class BatchProcessThread(QThread):
                 else:
                     actual_conversion_type = "英文转中文"  # 默认
                 
-                self.step_progress.emit("步骤 4/5", f"智能检测为: {detected_lang} -> {actual_conversion_type}")
+                # 根据实际转换类型选择正确的发音人
+                if voice_params.get('voice_type') == "auto_detect":
+                    if actual_conversion_type in ["中文转英文", "英文转英文"]:
+                        # 目标语言是英文，使用英文发音人
+                        voice_type = voice_params.get('voice_type_en', 'x4_EnUs_Laura_education')
+                    else:
+                        # 目标语言是中文，使用中文发音人
+                        voice_type = voice_params.get('voice_type_cn', 'xiaoyan')
+                    
+                    # 更新voice_params中的voice_type
+                    voice_params['voice_type'] = voice_type
+                    print(f"🧠 智能转换：检测到 {detected_lang} -> {actual_conversion_type}，选择发音人：{voice_type}")
+                
+                self.step_progress.emit("步骤 4/5", f"智能检测为: {detected_lang} -> {actual_conversion_type}，发音人：{voice_params.get('voice_type', 'xiaoyan')}")
             
             # 5. 语音合成
             self.step_progress.emit("步骤 5/5", f"正在进行语音合成: {actual_conversion_type}")
@@ -860,22 +873,34 @@ class BatchProcessDialog(QDialog):
         ])
         self.conversion_combo.currentTextChanged.connect(self.onConfigChanged)
         
-        # 发音人
-        voice_label = QLabel("发音人:")
-        voice_label.setStyleSheet("font-weight: bold; color: #333;")
-        voice_label.setAlignment(Qt.AlignLeft)  # 标签左对齐
-        self.voice_combo = QComboBox()
-        voice_items = [
-            "xiaoyan - 小燕（女声）",
-            "xiaoyu - 小宇（男声）", 
-            "xiaoxin - 小欣（女声）",
-            "aisxping - 小萍（女声）",
-            "x4_EnUs_Laura_education - Laura（英文女声）",
-            "x4_EnUs_Emma_education - Emma（英文女声）",
-            "x4_EnUs_Alex_education - Alex（英文男声）"
+        # 中文发音人
+        voice_cn_label = QLabel("中文发音人:")
+        voice_cn_label.setStyleSheet("font-weight: bold; color: #333;")
+        voice_cn_label.setAlignment(Qt.AlignLeft)
+        self.voice_combo_cn = QComboBox()
+        voice_cn_items = [
+            "xiaoyan (女声·亲和)",
+            "aisjiuxu (男声·专业)",
+            "aisxping (男声·成熟)",
+            "aisjinger (女声·温暖)",
+            "aisbabyxu (童声·可爱)"
         ]
-        self.voice_combo.addItems(voice_items)
-        self.voice_combo.currentTextChanged.connect(self.onConfigChanged)
+        self.voice_combo_cn.addItems(voice_cn_items)
+        self.voice_combo_cn.currentTextChanged.connect(self.onConfigChanged)
+        
+        # 英文发音人
+        voice_en_label = QLabel("英文发音人:")
+        voice_en_label.setStyleSheet("font-weight: bold; color: #333;")
+        voice_en_label.setAlignment(Qt.AlignLeft)
+        self.voice_combo_en = QComboBox()
+        voice_en_items = [
+            "x4_EnUs_Laura_education (女声·教育)",
+            "x4_EnUs_Alex_education (男声·教育)",
+            "x4_EnUs_Emma_formal (女声·正式)",
+            "x4_EnUs_Chris_formal (男声·正式)"
+        ]
+        self.voice_combo_en.addItems(voice_en_items)
+        self.voice_combo_en.currentTextChanged.connect(self.onConfigChanged)
         
         # 并发数量
         concurrent_label = QLabel("并发数量:")
@@ -894,10 +919,12 @@ class BatchProcessDialog(QDialog):
         
         conversion_layout.addWidget(conversion_type_label, 0, 0, Qt.AlignLeft)
         conversion_layout.addWidget(self.conversion_combo, 0, 1, Qt.AlignLeft)
-        conversion_layout.addWidget(voice_label, 1, 0, Qt.AlignLeft)
-        conversion_layout.addWidget(self.voice_combo, 1, 1, Qt.AlignLeft)
-        conversion_layout.addWidget(concurrent_label, 2, 0, Qt.AlignLeft)
-        conversion_layout.addWidget(self.concurrent_combo, 2, 1, Qt.AlignLeft)
+        conversion_layout.addWidget(voice_cn_label, 1, 0, Qt.AlignLeft)
+        conversion_layout.addWidget(self.voice_combo_cn, 1, 1, Qt.AlignLeft)
+        conversion_layout.addWidget(voice_en_label, 2, 0, Qt.AlignLeft)
+        conversion_layout.addWidget(self.voice_combo_en, 2, 1, Qt.AlignLeft)
+        conversion_layout.addWidget(concurrent_label, 3, 0, Qt.AlignLeft)
+        conversion_layout.addWidget(self.concurrent_combo, 3, 1, Qt.AlignLeft)
         
         # 语音参数区域 - 左对齐
         voice_params_group = QGroupBox("语音参数")
@@ -1268,13 +1295,22 @@ class BatchProcessDialog(QDialog):
             else:
                 # 统一配置模式
                 conversion_type = self.conversion_combo.currentText()
-                voice_type = self.voice_combo.currentText().split(' - ')[0]
+                # 根据转换类型选择对应的发音人
+            conversion_type = self.conversion_combo.currentText()
+            if conversion_type in ["英文转英文", "中文转英文"]:
+                voice_type = self.voice_combo_en.currentText().split(' (')[0]
+            elif conversion_type in ["中文转中文", "英文转中文"]:
+                voice_type = self.voice_combo_cn.currentText().split(' (')[0]
+            else:  # 智能转换，传递两种发音人，让ProcessThread动态选择
+                voice_type = "auto_detect"  # 特殊标记，表示需要动态选择
                 speed = self.speed_slider.value()
                 volume = self.volume_slider.value()
                 quality = self.quality_combo.currentText()
                 
                 voice_params = {
                     'voice_type': voice_type,
+                    'voice_type_cn': self.voice_combo_cn.currentText().split(' (')[0],
+                    'voice_type_en': self.voice_combo_en.currentText().split(' (')[0],
                     'speed': speed,
                     'volume': volume,
                     'quality': quality
@@ -1545,7 +1581,9 @@ class BatchProcessDialog(QDialog):
         """保存当前配置到指定文件"""
         config = {
             'conversion_type': self.conversion_combo.currentText(),
-            'voice_type': self.voice_combo.currentText().split(' - ')[0],
+            'voice_type': self.voice_combo_cn.currentText().split(' (')[0],
+            'voice_type_cn': self.voice_combo_cn.currentText().split(' (')[0],
+            'voice_type_en': self.voice_combo_en.currentText().split(' (')[0],
             'speed': self.speed_slider.value(),
             'volume': self.volume_slider.value(),
             'quality': self.quality_combo.currentText()
@@ -1567,10 +1605,21 @@ class BatchProcessDialog(QDialog):
         
         # 查找匹配的发音人
         voice_type = config['voice_type']
-        for i in range(self.voice_combo.count()):
-            if self.voice_combo.itemText(i).startswith(voice_type):
-                self.voice_combo.setCurrentIndex(i)
+        # 根据voice_type设置对应的发音人
+        # 先尝试在中文发音人中查找
+        found = False
+        for i in range(self.voice_combo_cn.count()):
+            if voice_type in self.voice_combo_cn.itemText(i):
+                self.voice_combo_cn.setCurrentIndex(i)
+                found = True
                 break
+        
+        # 如果在中文发音人中没找到，尝试在英文发音人中查找
+        if not found:
+            for i in range(self.voice_combo_en.count()):
+                if voice_type in self.voice_combo_en.itemText(i):
+                    self.voice_combo_en.setCurrentIndex(i)
+                    break
         
         self.speed_slider.setValue(config['speed'])
         self.volume_slider.setValue(config['volume'])
@@ -1650,14 +1699,21 @@ class BatchProcessDialog(QDialog):
                         self.volume_slider.setValue(config.get('voice_volume', 80))
                         print(f"设置音量: {config.get('voice_volume', 80)}")
                     
-                    # 更新发音人设置
-                    if hasattr(self, 'voice_combo'):
-                        voice_type = config.get('voice_type', 'xiaoyan')
-                        for i in range(self.voice_combo.count()):
-                            if self.voice_combo.itemText(i).startswith(voice_type):
-                                self.voice_combo.setCurrentIndex(i)
-                                print(f"设置发音人: {voice_type} -> 索引 {i}")
-                                break
+                    # 更新中文发音人设置
+                    voice_type_cn = config.get('voice_type_cn', 'xiaoyan (女声·亲和)')
+                    for i in range(self.voice_combo_cn.count()):
+                        if voice_type_cn.split(' ')[0] in self.voice_combo_cn.itemText(i):
+                            self.voice_combo_cn.setCurrentIndex(i)
+                            print(f"设置中文发音人: {voice_type_cn} -> 索引 {i}")
+                            break
+                    
+                    # 更新英文发音人设置
+                    voice_type_en = config.get('voice_type_en', 'x4_EnUs_Laura_education (女声·教育)')
+                    for i in range(self.voice_combo_en.count()):
+                        if voice_type_en.split(' ')[0] in self.voice_combo_en.itemText(i):
+                            self.voice_combo_en.setCurrentIndex(i)
+                            print(f"设置英文发音人: {voice_type_en} -> 索引 {i}")
+                            break
                     
                     # 更新转换类型（如果存在）
                     if hasattr(self, 'conversion_combo'):
@@ -1687,9 +1743,20 @@ class BatchProcessDialog(QDialog):
                     
                     # 4. 如果在统一配置模式，更新所有文件的配置
                     if hasattr(self, 'uniform_config_radio') and self.uniform_config_radio.isChecked():
+                        # 根据转换类型选择对应的发音人
+                        conversion_type = self.conversion_combo.currentText()
+                        if conversion_type in ["英文转英文", "中文转英文"]:
+                            voice_type = self.voice_combo_en.currentText().split(' (')[0]
+                        elif conversion_type in ["中文转中文", "英文转中文"]:
+                            voice_type = self.voice_combo_cn.currentText().split(' (')[0]
+                        else:  # 智能转换，默认使用中文发音人
+                            voice_type = self.voice_combo_cn.currentText().split(' (')[0]
+                        
                         updated_config = {
-                            'conversion_type': self.conversion_combo.currentText(),
-                            'voice_type': self.voice_combo.currentText().split(' - ')[0] if hasattr(self, 'voice_combo') else config.get('voice_type', 'xiaoyan'),
+                            'conversion_type': conversion_type,
+                            'voice_type': voice_type,
+                            'voice_type_cn': self.voice_combo_cn.currentText().split(' (')[0],
+                            'voice_type_en': self.voice_combo_en.currentText().split(' (')[0],
                             'speed': self.speed_slider.value() if hasattr(self, 'speed_slider') else config.get('voice_speed', 100),
                             'volume': self.volume_slider.value() if hasattr(self, 'volume_slider') else config.get('voice_volume', 80),
                             'quality': self.quality_combo.currentText() if hasattr(self, 'quality_combo') else config.get('output_quality', '高质量'),
@@ -1730,10 +1797,21 @@ class BatchProcessDialog(QDialog):
         self.conversion_combo.setCurrentText(config['conversion_type'])
         
         voice_type = config['voice_type']
-        for i in range(self.voice_combo.count()):
-            if self.voice_combo.itemText(i).startswith(voice_type):
-                self.voice_combo.setCurrentIndex(i)
+        # 根据voice_type设置对应的发音人
+        # 先尝试在中文发音人中查找
+        found = False
+        for i in range(self.voice_combo_cn.count()):
+            if voice_type in self.voice_combo_cn.itemText(i):
+                self.voice_combo_cn.setCurrentIndex(i)
+                found = True
                 break
+        
+        # 如果在中文发音人中没找到，尝试在英文发音人中查找
+        if not found:
+            for i in range(self.voice_combo_en.count()):
+                if voice_type in self.voice_combo_en.itemText(i):
+                    self.voice_combo_en.setCurrentIndex(i)
+                    break
         
         self.speed_slider.setValue(config['speed'])
         self.volume_slider.setValue(config['volume'])
@@ -1756,9 +1834,20 @@ class BatchProcessDialog(QDialog):
         )
         
         if reply == QMessageBox.Yes:
+            # 根据转换类型选择对应的发音人
+            conversion_type = self.conversion_combo.currentText()
+            if conversion_type in ["英文转英文", "中文转英文"]:
+                voice_type = self.voice_combo_en.currentText().split(' (')[0]
+            elif conversion_type in ["中文转中文", "英文转中文"]:
+                voice_type = self.voice_combo_cn.currentText().split(' (')[0]
+            else:  # 智能转换，传递两种发音人，让ProcessThread动态选择
+                voice_type = "auto_detect"  # 特殊标记，表示需要动态选择
+            
             current_config = {
-                'conversion_type': self.conversion_combo.currentText(),
-                'voice_type': self.voice_combo.currentText().split(' - ')[0],
+                'conversion_type': conversion_type,
+                'voice_type': voice_type,
+                'voice_type_cn': self.voice_combo_cn.currentText().split(' (')[0],
+                'voice_type_en': self.voice_combo_en.currentText().split(' (')[0],
                 'speed': self.speed_slider.value(),
                 'volume': self.volume_slider.value(),
                 'quality': self.quality_combo.currentText(),

@@ -705,32 +705,14 @@ class SettingsDialog(QDialog):
         voice_params_layout.setHorizontalSpacing(10)
         voice_params_layout.setContentsMargins(15, 20, 15, 15)
         
-        # 语速设置
-        self.voice_speed = QSlider(Qt.Horizontal)
-        self.voice_speed.setRange(50, 200)
-        self.voice_speed.setValue(100)
-        self.voice_speed_label = QLabel("100%")
-        self.voice_speed_label.setMinimumWidth(40)
-        self.voice_speed_label.setAlignment(Qt.AlignCenter)
-        self.voice_speed.valueChanged.connect(lambda v: self.voice_speed_label.setText(f"{v}%"))
-        speed_layout = QHBoxLayout()
-        speed_layout.addWidget(self.voice_speed)
-        speed_layout.addWidget(self.voice_speed_label)
+        # 语速设置 - 使用增强滑块
+        self.voice_speed = EnhancedSlider(50, 200, 100, 5, "%")
         
-        # 音量设置
-        self.voice_volume = QSlider(Qt.Horizontal)
-        self.voice_volume.setRange(0, 100)
-        self.voice_volume.setValue(80)
-        self.voice_volume_label = QLabel("80%")
-        self.voice_volume_label.setMinimumWidth(40)
-        self.voice_volume_label.setAlignment(Qt.AlignCenter)
-        self.voice_volume.valueChanged.connect(lambda v: self.voice_volume_label.setText(f"{v}%"))
-        volume_layout = QHBoxLayout()
-        volume_layout.addWidget(self.voice_volume)
-        volume_layout.addWidget(self.voice_volume_label)
+        # 音量设置 - 使用增强滑块
+        self.voice_volume = EnhancedSlider(0, 100, 80, 5, "%")
         
-        voice_params_layout.addRow("语速 (50-200%):", speed_layout)
-        voice_params_layout.addRow("音量 (0-100%):", volume_layout)
+        voice_params_layout.addRow("语速 (50-200%):", self.voice_speed)
+        voice_params_layout.addRow("音量 (0-100%):", self.voice_volume)
         voice_params_group.setLayout(voice_params_layout)
         
         # 创建发音人和质量设置分组
@@ -741,16 +723,23 @@ class SettingsDialog(QDialog):
         voice_config_layout.setHorizontalSpacing(10)
         voice_config_layout.setContentsMargins(15, 20, 15, 15)
         
-        # 发音人选择
-        self.voice_type = QComboBox()
-        self.voice_type.addItems([
-            "xiaoyan - 小燕（女声）",
-            "xiaoyu - 小宇（男声）", 
-            "xiaoxin - 小欣（女声）",
-            "aisxping - 小萍（女声）",
-            "x4_EnUs_Laura_education - Laura（英文女声）",
-            "x4_EnUs_Emma_education - Emma（英文女声）",
-            "x4_EnUs_Alex_education - Alex（英文男声）"
+        # 中文发音人选择
+        self.voice_type_cn = QComboBox()
+        self.voice_type_cn.addItems([
+            "xiaoyan (女声·亲和)",
+            "aisjiuxu (男声·专业)",
+            "aisxping (男声·成熟)",
+            "aisjinger (女声·温暖)",
+            "aisbabyxu (童声·可爱)"
+        ])
+        
+        # 英文发音人选择
+        self.voice_type_en = QComboBox()
+        self.voice_type_en.addItems([
+            "x4_EnUs_Laura_education (女声·教育)",
+            "x4_EnUs_Alex_education (男声·教育)",
+            "x4_EnUs_Emma_formal (女声·正式)",
+            "x4_EnUs_Chris_formal (男声·正式)"
         ])
         
         # 输出质量
@@ -772,7 +761,8 @@ class SettingsDialog(QDialog):
             "同时生成：提供两种选择"
         )
         
-        voice_config_layout.addRow("发音人:", self.voice_type)
+        voice_config_layout.addRow("中文发音人:", self.voice_type_cn)
+        voice_config_layout.addRow("英文发音人:", self.voice_type_en)
         voice_config_layout.addRow("输出质量:", self.output_quality)
         voice_config_layout.addRow("字幕嵌入方式:", self.subtitle_mode)
         voice_config_group.setLayout(voice_config_layout)
@@ -986,11 +976,18 @@ class SettingsDialog(QDialog):
                     self.voice_speed.setValue(settings.get('voice_speed', 100))
                     self.voice_volume.setValue(settings.get('voice_volume', 80))
                     
-                    # 加载发音人设置
-                    voice_type = settings.get('voice_type', 'xiaoyan')
-                    for i in range(self.voice_type.count()):
-                        if self.voice_type.itemText(i).startswith(voice_type):
-                            self.voice_type.setCurrentIndex(i)
+                    # 加载中文发音人设置
+                    voice_type_cn = settings.get('voice_type_cn', 'xiaoyan (女声·亲和)')
+                    for i in range(self.voice_type_cn.count()):
+                        if voice_type_cn.split(' ')[0] in self.voice_type_cn.itemText(i):
+                            self.voice_type_cn.setCurrentIndex(i)
+                            break
+                    
+                    # 加载英文发音人设置
+                    voice_type_en = settings.get('voice_type_en', 'x4_EnUs_Laura_education (女声·教育)')
+                    for i in range(self.voice_type_en.count()):
+                        if voice_type_en.split(' ')[0] in self.voice_type_en.itemText(i):
+                            self.voice_type_en.setCurrentIndex(i)
                             break
                     
                     # 加载其他设置
@@ -1042,7 +1039,9 @@ class SettingsDialog(QDialog):
             # 语音设置
             'voice_speed': self.voice_speed.value(),
             'voice_volume': self.voice_volume.value(),
-            'voice_type': self.voice_type.currentText().split(' - ')[0],  # 提取发音人代码
+            'voice_type_cn': self.voice_type_cn.currentText(),  # 中文发音人
+            'voice_type_en': self.voice_type_en.currentText(),  # 英文发音人
+            'voice_type': self.voice_type_cn.currentText().split(' (')[0],  # 保留兼容性
             'output_quality': self.output_quality.currentText(),
             'subtitle_mode': self.subtitle_mode.currentText(),
             # 应用设置
@@ -1080,7 +1079,9 @@ class SettingsDialog(QDialog):
                     'voice_speed': self.voice_speed.value(),
                     'voice_volume': self.voice_volume.value(),
                     # 删除voice_pitch - 实际处理中不使用
-                    'voice_type': self.voice_type.currentText().split(' - ')[0],
+                    'voice_type_cn': self.voice_type_cn.currentText(),
+                    'voice_type_en': self.voice_type_en.currentText(),
+                    'voice_type': self.voice_type_cn.currentText().split(' (')[0],
                     'output_quality': self.output_quality.currentText(),
                     'subtitle_mode': self.subtitle_mode.currentText(),
                     'auto_save': self.auto_save.isChecked(),
@@ -1115,10 +1116,18 @@ class SettingsDialog(QDialog):
                 self.voice_volume.setValue(settings.get('voice_volume', 80))
                 # 删除voice_pitch读取 - 实际处理中不使用
                 
-                voice_type = settings.get('voice_type', 'xiaoyan')
-                for i in range(self.voice_type.count()):
-                    if self.voice_type.itemText(i).startswith(voice_type):
-                        self.voice_type.setCurrentIndex(i)
+                # 中文发音人设置
+                voice_type_cn = settings.get('voice_type_cn', 'xiaoyan (女声·亲和)')
+                for i in range(self.voice_type_cn.count()):
+                    if voice_type_cn.split(' ')[0] in self.voice_type_cn.itemText(i):
+                        self.voice_type_cn.setCurrentIndex(i)
+                        break
+                
+                # 英文发音人设置
+                voice_type_en = settings.get('voice_type_en', 'x4_EnUs_Laura_education (女声·教育)')
+                for i in range(self.voice_type_en.count()):
+                    if voice_type_en.split(' ')[0] in self.voice_type_en.itemText(i):
+                        self.voice_type_en.setCurrentIndex(i)
                         break
                 
                 quality = settings.get('output_quality', '高质量')
@@ -1154,7 +1163,8 @@ class SettingsDialog(QDialog):
             self.voice_speed.setValue(100)
             self.voice_volume.setValue(80)
             # 删除voice_pitch重置 - 实际处理中不使用
-            self.voice_type.setCurrentIndex(0)
+            self.voice_type_cn.setCurrentIndex(0)
+            self.voice_type_en.setCurrentIndex(0)
             self.output_quality.setCurrentText("高质量")
             self.subtitle_mode.setCurrentText("硬字幕（烧录到视频）")
             
@@ -1339,6 +1349,19 @@ class ProcessThread(QThread):
                     actual_conversion_type = "英文转中文"
                 else:
                     actual_conversion_type = "英文转中文"
+                
+                # 根据实际转换类型选择正确的发音人
+                if self.voice_params.get('voice_type') == "auto_detect":
+                    if actual_conversion_type in ["中文转英文", "英文转英文"]:
+                        # 目标语言是英文，使用英文发音人
+                        voice_type = self.voice_params.get('voice_type_en', 'x4_EnUs_Laura_education')
+                    else:
+                        # 目标语言是中文，使用中文发音人
+                        voice_type = self.voice_params.get('voice_type_cn', 'xiaoyan')
+                    
+                    # 更新voice_params中的voice_type
+                    self.voice_params['voice_type'] = voice_type
+                    print(f"🧠 智能转换：检测到 {detected_lang} -> {actual_conversion_type}，选择发音人：{voice_type}")
             
             # --- 步骤 4: 合成新语音 ---
             if not self._is_running: return
@@ -2116,21 +2139,40 @@ class EnhancedMainWindow(QMainWindow):
                     
                     # 应用语音设置到UI
                     if hasattr(self, 'speed_slider'):
-                        self.speed_slider.setValue(config.get('voice_speed', 100))
-                    if hasattr(self, 'volume_slider'):
-                        self.volume_slider.setValue(config.get('voice_volume', 80))
+                        speed_value = config.get('voice_speed', 100)
+                        self.speed_slider.setValue(speed_value)
+                        if hasattr(self, 'speed_value_edit'):
+                            self.speed_value_edit.setText(str(speed_value))
                     
-                    # 应用发音人设置
-                    if hasattr(self, 'voice_combo'):
-                        voice_type = config.get('voice_type', 'xiaoyan')
-                        for i in range(self.voice_combo.count()):
-                            if self.voice_combo.itemText(i).startswith(voice_type):
-                                self.voice_combo.setCurrentIndex(i)
+                    if hasattr(self, 'volume_slider'):
+                        volume_value = config.get('voice_volume', 80)
+                        self.volume_slider.setValue(volume_value)
+                        if hasattr(self, 'volume_value_edit'):
+                            self.volume_value_edit.setText(str(volume_value))
+                    
+                    # 应用中文发音人设置
+                    if hasattr(self, 'voice_combo_cn'):
+                        voice_type_cn = config.get('voice_type_cn', 'xiaoyan (女声·亲和)')
+                        for i in range(self.voice_combo_cn.count()):
+                            if voice_type_cn.split(' ')[0] in self.voice_combo_cn.itemText(i):
+                                self.voice_combo_cn.setCurrentIndex(i)
+                                break
+                    
+                    # 应用英文发音人设置
+                    if hasattr(self, 'voice_combo_en'):
+                        voice_type_en = config.get('voice_type_en', 'x4_EnUs_Laura_education (女声·教育)')
+                        for i in range(self.voice_combo_en.count()):
+                            if voice_type_en.split(' ')[0] in self.voice_combo_en.itemText(i):
+                                self.voice_combo_en.setCurrentIndex(i)
                                 break
                     
                     # 应用其他设置
                     if hasattr(self, 'quality_combo'):
                         self.quality_combo.setCurrentText(config.get('output_quality', '高质量'))
+                    
+                    # 更新发音人显示
+                    if hasattr(self, 'conversion_combo'):
+                        self.updateVoiceSelection()
                     
                     print(f"✅ 主界面配置已更新: 语速={config.get('voice_speed', 100)}, 音量={config.get('voice_volume', 80)}")
                     
@@ -2162,8 +2204,8 @@ class EnhancedMainWindow(QMainWindow):
             self.setWindowIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         
         # 优化窗口大小，确保布局合理
-        self.setMinimumSize(850, 650)  # 增加最小高度确保内容显示完整
-        self.resize(950, 700)  # 增加初始高度，避免内容重叠
+        self.setMinimumSize(900, 650)  # 减小最小高度适应紧凑布局
+        self.resize(1100, 700)  # 减小初始高度适应紧凑布局
         
         # 窗口居中显示
         self.centerWindow()
@@ -2174,39 +2216,66 @@ class EnhancedMainWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         
         # 优化边距和间距
-        main_layout.setContentsMargins(12, 12, 12, 12)  # 减小边距
-        main_layout.setSpacing(10)  # 减小间距
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(10)
 
         # 标题区域 - 居中显示
         title_section = self.createTitleSection()
         main_layout.addLayout(title_section)
         
-        # 内容区域 - 水平布局
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(10)  # 减小间距
+        # 内容区域 - 使用QSplitter实现可调节的左右分割
+        self.content_splitter = QSplitter(Qt.Horizontal)
+        self.content_splitter.setHandleWidth(6)
+        self.content_splitter.setChildrenCollapsible(False)  # 防止面板完全折叠
+        
+        # 设置分割器样式
+        self.content_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #e0e0e0;
+                border: 1px solid #c0c0c0;
+                border-radius: 2px;
+                margin: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #d0d0d0;
+            }
+            QSplitter::handle:pressed {
+                background-color: #c0c0c0;
+            }
+        """)
         
         # 左侧控制区域
         left_widget = QWidget()
+        left_widget.setMinimumWidth(450)  # 设置最小宽度确保控件显示完整
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setSpacing(12)  # 统一间距
-        left_layout.setContentsMargins(8, 8, 8, 8)  # 适当的边距
+        left_layout.setSpacing(6)  # 减小间距
+        left_layout.setContentsMargins(6, 6, 6, 6)  # 减小边距
+        
+        # 添加左侧各个功能区域
         left_layout.addWidget(self.createFileSection())
         left_layout.addWidget(self.createConversionSection())
-        left_layout.addWidget(self.createProgressSection())
-        left_layout.addWidget(self.createButtonSection())
+        left_layout.addWidget(self.createProgressAndButtonSection())  # 合并进度和按钮
         left_layout.addWidget(self.createResultSection())
-        left_layout.addStretch()
+        left_layout.addStretch()  # 添加弹性空间
         
         # 右侧字幕显示区域
         right_widget = QWidget()
+        right_widget.setMinimumWidth(300)  # 设置最小宽度
         right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.addWidget(self.createSubtitleSection())
         
-        # 设置左右区域比例
-        content_layout.addWidget(left_widget, 1)  # 左侧占1/3
-        content_layout.addWidget(right_widget, 2)  # 右侧占2/3
+        # 将左右区域添加到分割器
+        self.content_splitter.addWidget(left_widget)
+        self.content_splitter.addWidget(right_widget)
         
-        main_layout.addLayout(content_layout, 1)  # 内容区域占主要空间
+        # 设置初始分割比例：左侧60%，右侧40%
+        self.content_splitter.setSizes([600, 400])
+        self.content_splitter.setStretchFactor(0, 1)
+        self.content_splitter.setStretchFactor(1, 1)
+        
+        # 添加分割器到主布局
+        main_layout.addWidget(self.content_splitter, 1)  # 内容区域占主要空间
         
         self.createMenuBar()
         self.createStatusBar()
@@ -2339,18 +2408,29 @@ class EnhancedMainWindow(QMainWindow):
                 self.result_group.setMinimumHeight(new_height)
                 self.result_group.setMaximumHeight(new_height + 60)
             
-            # 调整配置转换区域
-            if hasattr(self, 'conversion_group'):
-                base_height = 200
-                new_height = max(180, min(280, int(base_height * factor)))
-                self.conversion_group.setMinimumHeight(new_height)
-                self.conversion_group.setMaximumHeight(new_height + 40)
+            # 不再强制设置配置转换区域的固定高度，让其自适应内容
+            # 配置转换区域现在使用滚动区域，会自动适应内容
             
             # 调整滚动区域
             if hasattr(self, 'result_scroll_area'):
                 base_height = 120
                 new_height = max(100, min(200, int(base_height * factor)))
                 self.result_scroll_area.setMinimumHeight(new_height)
+            
+            # 调整分割器的最小尺寸
+            if hasattr(self, 'content_splitter'):
+                # 根据缩放调整左右面板的最小宽度
+                left_min_width = max(400, int(450 * factor))
+                right_min_width = max(250, int(300 * factor))
+                
+                # 获取分割器中的子控件并设置最小宽度
+                if self.content_splitter.count() >= 2:
+                    left_widget = self.content_splitter.widget(0)
+                    right_widget = self.content_splitter.widget(1)
+                    if left_widget:
+                        left_widget.setMinimumWidth(left_min_width)
+                    if right_widget:
+                        right_widget.setMinimumWidth(right_min_width)
                 self.result_scroll_area.setMaximumHeight(new_height + 80)
             
             # 调整按钮大小
@@ -2587,6 +2667,8 @@ class EnhancedMainWindow(QMainWindow):
         group = QGroupBox("1. 选择文件")
         group.setObjectName("fileSection")
         layout = QVBoxLayout(group)
+        layout.setSpacing(6)  # 减小间距
+        layout.setContentsMargins(8, 8, 8, 8)  # 减小边距
         
         # 输入文件（使用自定义组件）
         self.file_input_widget = FileInputWidget()
@@ -2594,6 +2676,7 @@ class EnhancedMainWindow(QMainWindow):
         
         # 输出目录 - 简化图标，只保留必要的
         output_layout = QHBoxLayout()
+        output_layout.setSpacing(6)  # 减小间距
         
         output_label = QLabel("输出到:")
         output_label.setObjectName("outputLabel")
@@ -2619,32 +2702,33 @@ class EnhancedMainWindow(QMainWindow):
         group.setObjectName("conversionSection")
         self.conversion_group = group  # 保存引用供缩放使用
         layout = QVBoxLayout(group)
-        layout.setSpacing(12)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(6)  # 减小间距
+        layout.setContentsMargins(8, 8, 8, 8)  # 减小边距
         
-        # 创建网格布局，更合理地安排组件
-        main_form = QGridLayout()
-        main_form.setSpacing(12)
-        main_form.setVerticalSpacing(12)
-        main_form.setContentsMargins(0, 0, 0, 0)
+        # 创建紧凑的网格布局，不使用滚动区域
+        main_grid = QGridLayout()
+        main_grid.setSpacing(6)
+        main_grid.setVerticalSpacing(6)
+        main_grid.setContentsMargins(0, 0, 0, 0)
         
-        # 统一的标签样式 - 调整字体大小与其他部分一致
+        # 统一的标签样式
         label_style = """
             QLabel {
                 color: #333; 
-                font-size: 13px; 
+                font-size: 12px; 
+                font-weight: 500;
                 min-width: 70px;
                 background: transparent;
                 border: none;
-                padding: 0px;
+                padding: 1px;
             }
         """
         
-        # 第一行：转换类型和发音人
+        # 第一行：转换类型和输出质量并排
         conversion_label = QLabel("转换类型:")
         conversion_label.setStyleSheet(label_style)
         self.conversion_combo = QComboBox()
-        # 移除自定义样式，使用原生外观
+        self.conversion_combo.setMinimumHeight(26)
         self.conversion_combo.addItems([
             "智能转换",
             "中文转英文",
@@ -2653,69 +2737,130 @@ class EnhancedMainWindow(QMainWindow):
             "英文转英文"
         ])
         
-        voice_label = QLabel("发音人:")
-        voice_label.setStyleSheet(label_style)
-        self.voice_combo = QComboBox()
-        # 移除自定义样式，使用原生外观
-        voice_items = [
-            "xiaoyan - 小燕（女声）",
-            "xiaoyu - 小宇（男声）", 
-            "xiaoxin - 小欣（女声）",
-            "aisxping - 小萍（女声）",
-            "x4_EnUs_Laura_education - Laura（英文女声）",
-            "x4_EnUs_Emma_education - Emma（英文女声）",
-            "x4_EnUs_Alex_education - Alex（英文男声）"
-        ]
-        self.voice_combo.addItems(voice_items)
-        
-        # 第二行：语速和音量（使用EnhancedSlider，保持在同一行）
-        speed_label = QLabel("语速:")
-        speed_label.setStyleSheet(label_style)
-        self.speed_slider = EnhancedSlider(50, 200, 100, 5, "%")
-        self.speed_slider.setFixedWidth(220)  # 增加滑动条宽度
-        
-        volume_label = QLabel("音量:")
-        volume_label.setStyleSheet(label_style)
-        self.volume_slider = EnhancedSlider(0, 100, 80, 5, "%")
-        self.volume_slider.setFixedWidth(220)  # 增加滑动条宽度，与语速保持一致
-        
-        # 第二行：输出质量（和语速、音量在同一行，但在右侧）
         quality_label = QLabel("输出质量:")
         quality_label.setStyleSheet(label_style)
         self.quality_combo = QComboBox()
-        # 移除自定义样式，使用原生外观
+        self.quality_combo.setMinimumHeight(26)
         quality_items = ["标准质量", "高质量", "超清质量"]
         self.quality_combo.addItems(quality_items)
         self.quality_combo.setCurrentIndex(1)  # 默认高质量
         
-        # 布局安排 - 2行4列布局
-        # 第一行：转换类型 | 转换类型控件 | 发音人 | 发音人控件
-        main_form.addWidget(conversion_label, 0, 0)
-        main_form.addWidget(self.conversion_combo, 0, 1)
-        main_form.addWidget(voice_label, 0, 2)
-        main_form.addWidget(self.voice_combo, 0, 3)
+        main_grid.addWidget(conversion_label, 0, 0)
+        main_grid.addWidget(self.conversion_combo, 0, 1)
+        main_grid.addWidget(quality_label, 0, 2)
+        main_grid.addWidget(self.quality_combo, 0, 3)
         
-        # 第二行：语速 | 语速控件 | 音量 | 音量控件
-        main_form.addWidget(speed_label, 1, 0)
-        main_form.addWidget(self.speed_slider, 1, 1)
-        main_form.addWidget(volume_label, 1, 2)
-        main_form.addWidget(self.volume_slider, 1, 3)
+        # 第二行：中文发音人（占满整行）
+        voice_cn_label = QLabel("中文发音人:")
+        voice_cn_label.setStyleSheet(label_style)
+        self.voice_combo_cn = QComboBox()
+        self.voice_combo_cn.setMinimumHeight(26)
+        voice_cn_items = [
+            "xiaoyan (女声·亲和)",
+            "aisjiuxu (男声·专业)",
+            "aisxping (男声·成熟)",
+            "aisjinger (女声·温暖)",
+            "aisbabyxu (童声·可爱)"
+        ]
+        self.voice_combo_cn.addItems(voice_cn_items)
+        main_grid.addWidget(voice_cn_label, 1, 0)
+        main_grid.addWidget(self.voice_combo_cn, 1, 1, 1, 3)  # 跨3列
         
-        # 第三行：输出质量 | 质量控件 | （空） | （空）
-        main_form.addWidget(quality_label, 2, 0)
-        main_form.addWidget(self.quality_combo, 2, 1)
+        # 第三行：英文发音人（占满整行）
+        voice_en_label = QLabel("英文发音人:")
+        voice_en_label.setStyleSheet(label_style)
+        self.voice_combo_en = QComboBox()
+        self.voice_combo_en.setMinimumHeight(26)
+        voice_en_items = [
+            "x4_EnUs_Laura_education (女声·教育)",
+            "x4_EnUs_Alex_education (男声·教育)",
+            "x4_EnUs_Emma_formal (女声·正式)",
+            "x4_EnUs_Chris_formal (男声·正式)"
+        ]
+        self.voice_combo_en.addItems(voice_en_items)
+        main_grid.addWidget(voice_en_label, 2, 0)
+        main_grid.addWidget(self.voice_combo_en, 2, 1, 1, 3)  # 跨3列
         
-        # 设置列伸缩 - 让组件有合适的空间分配
-        main_form.setColumnStretch(0, 0)  # 标签列固定宽度
-        main_form.setColumnStretch(1, 1)  # 控件列可伸缩
-        main_form.setColumnStretch(2, 0)  # 标签列固定宽度
-        main_form.setColumnStretch(3, 1)  # 控件列可伸缩
+        # 第四行：语速和音量控制（占满整行，增加滑块长度）
+        speed_label = QLabel("语速:")
+        speed_label.setStyleSheet(label_style)
+        self.speed_slider = EnhancedSlider(50, 200, 100, 5, "%")
+        self.speed_slider.setMinimumWidth(200)  # 大幅增加滑块长度
         
-        # 添加到主布局
-        layout.addLayout(main_form)
-        layout.addStretch()  # 添加弹性空间，防止组件过度拉伸
+        volume_label = QLabel("音量:")
+        volume_label.setStyleSheet(label_style)
+        self.volume_slider = EnhancedSlider(0, 100, 80, 5, "%")
+        self.volume_slider.setMinimumWidth(200)  # 大幅增加滑块长度
+        
+        main_grid.addWidget(speed_label, 3, 0)
+        main_grid.addWidget(self.speed_slider, 3, 1)
+        main_grid.addWidget(volume_label, 3, 2)
+        main_grid.addWidget(self.volume_slider, 3, 3)
+        
+        # 设置列伸缩以充分利用空间
+        main_grid.setColumnStretch(0, 0)  # 标签列固定宽度
+        main_grid.setColumnStretch(1, 1)  # 第一个控件列可伸缩
+        main_grid.setColumnStretch(2, 0)  # 标签列固定宽度
+        main_grid.setColumnStretch(3, 1)  # 第二个控件列可伸缩
+        
+        # 添加网格布局到主布局
+        layout.addLayout(main_grid)
+        layout.addStretch()  # 添加弹性空间
+        
+        # 连接转换类型变化信号
+        self.conversion_combo.currentTextChanged.connect(self.updateVoiceSelection)
+        
+        # 连接滑块信号
+        self.speed_slider.valueChanged.connect(self.onSpeedChanged)
+        self.volume_slider.valueChanged.connect(self.onVolumeChanged)
         
         return group
+
+    def updateVoiceSelection(self):
+        """根据转换类型更新发音人控件的显示"""
+        try:
+            conversion_type = self.conversion_combo.currentText()
+            
+            # 获取表单布局
+            if hasattr(self, 'conversion_group'):
+                scroll_area = self.conversion_group.findChild(QScrollArea)
+                if scroll_area:
+                    content_widget = scroll_area.widget()
+                    if content_widget:
+                        form_layout = content_widget.findChild(QFormLayout)
+                        if form_layout:
+                            # 遍历表单布局中的行，找到发音人相关的行
+                            for i in range(form_layout.rowCount()):
+                                label_item = form_layout.itemAt(i, QFormLayout.LabelRole)
+                                field_item = form_layout.itemAt(i, QFormLayout.FieldRole)
+                                
+                                if label_item and field_item:
+                                    label_widget = label_item.widget()
+                                    field_widget = field_item.widget()
+                                    
+                                    if isinstance(label_widget, QLabel):
+                                        label_text = label_widget.text()
+                                        
+                                        # 根据转换类型控制发音人行的可见性
+                                        if "中文发音人" in label_text:
+                                            visible = conversion_type in ["中文转中文", "英文转中文", "智能转换"]
+                                            label_widget.setVisible(visible)
+                                            field_widget.setVisible(visible)
+                                        elif "英文发音人" in label_text:
+                                            visible = conversion_type in ["英文转英文", "中文转英文", "智能转换"]
+                                            label_widget.setVisible(visible)
+                                            field_widget.setVisible(visible)
+                                            
+        except Exception as e:
+            print(f"更新发音人选择失败: {e}")
+
+    def onSpeedChanged(self, value):
+        """语速滑块变化处理（数值框已删除）"""
+        pass
+
+    def onVolumeChanged(self, value):
+        """音量滑块变化处理（数值框已删除）"""
+        pass
 
     def createProgressSection(self):
         group = QGroupBox("3. 查看进度")
@@ -2796,24 +2941,110 @@ class EnhancedMainWindow(QMainWindow):
         
         return group
 
+    def createProgressAndButtonSection(self):
+        """创建合并的进度和按钮区域 - 调整高度平衡"""
+        group = QGroupBox("3. 进度与控制")
+        group.setObjectName("progressButtonSection")
+        group.setMinimumHeight(150)  # 减少最小高度
+        group.setMaximumHeight(180)  # 设置最大高度
+        layout = QVBoxLayout(group)
+        layout.setSpacing(5)  # 减小与进度条的间距
+        layout.setContentsMargins(10, 10, 10, 10)  # 减小边距
+        
+        # 第一行：进度条和状态
+        progress_container = QWidget()
+        progress_layout = QVBoxLayout(progress_container)
+        progress_layout.setSpacing(3)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 进度条
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(24)  # 增加高度
+        
+        # 状态显示
+        self.status_label = QLabel("准备就绪")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setFixedHeight(20)  # 增加高度
+        self.status_label.setStyleSheet("font-size: 12px; color: #666;")
+        
+        progress_layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.status_label)
+        
+        # 第二行：按钮控制 - 占满左边栏，统一间距
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setSpacing(10)  # 统一按钮间距
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 主操作按钮 - 设为弹性按钮
+        self.process_btn = QPushButton("开始转换")
+        self.process_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.process_btn.setObjectName("processButton")
+        self.process_btn.setFixedHeight(35)  # 减小高度
+        self.process_btn.clicked.connect(self.startProcessing)
+        
+        # 停止/暂停按钮
+        self.stop_btn = QPushButton("停止")
+        self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+        self.stop_btn.setObjectName("stopButton")
+        self.stop_btn.setFixedHeight(35)  # 与主按钮保持一致高度
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.toggleProcessing)
+        
+        # 记录当前处理状态
+        self.is_processing = False
+        self.is_paused = False
+        
+        # 其他功能按钮 - 统一高度
+        self.preview_btn = QPushButton("预览")
+        self.preview_btn.setObjectName("previewButton")
+        self.preview_btn.setFixedHeight(35)  # 统一高度
+        self.preview_btn.clicked.connect(self.openPreview)
+        
+        self.settings_btn = QPushButton("设置")
+        self.settings_btn.setObjectName("settingsButton")
+        self.settings_btn.setFixedHeight(35)  # 统一高度
+        self.settings_btn.clicked.connect(self.openSettings)
+        
+        self.batch_btn = QPushButton("批量")
+        self.batch_btn.setObjectName("batchButton")
+        self.batch_btn.setFixedHeight(35)  # 统一高度
+        self.batch_btn.clicked.connect(self.openBatchProcessor)
+        
+        # 布局按钮 - 使用弹性布局让按钮占满宽度
+        # 主按钮占更大比例
+        button_layout.addWidget(self.process_btn, 3)  # 占3份空间
+        button_layout.addWidget(self.stop_btn, 2)     # 占2份空间
+        button_layout.addWidget(self.preview_btn, 1)  # 占1份空间
+        button_layout.addWidget(self.settings_btn, 1) # 占1份空间
+        button_layout.addWidget(self.batch_btn, 1)    # 占1份空间
+        
+        # 添加到主布局
+        layout.addWidget(progress_container)
+        layout.addWidget(button_container)
+        
+        return group
+
     def createResultSection(self):
-        """创建结果显示区域 - 重新设计，确保可以完整滚动显示"""
-        group = QGroupBox("5. 处理结果")
+        """创建结果显示区域 - 平衡设计"""
+        group = QGroupBox("4. 处理结果")
         group.setObjectName("resultSection")
         self.result_group = group  # 保存引用供缩放使用
-        group.setMinimumHeight(200)  # 减小最小高度
-        group.setMaximumHeight(250)  # 减小最大高度，为其他区域留出空间
+        group.setMinimumHeight(170)  # 增加最小高度
+        group.setMaximumHeight(220)  # 增加最大高度
         layout = QVBoxLayout(group)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)  # 稍微增加边距
+        layout.setSpacing(8)  # 稍微增加间距
         
-        # 结果显示滚动区域 - 重新调整高度
+        # 结果显示滚动区域 - 增加可视高度
         self.result_scroll_area = QScrollArea()
         self.result_scroll_area.setWidgetResizable(True)
         self.result_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.result_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.result_scroll_area.setMinimumHeight(110)  # 减小最小可视高度
-        self.result_scroll_area.setMaximumHeight(150)  # 减小最大高度
+        self.result_scroll_area.setMinimumHeight(110)  # 增加最小可视高度
+        self.result_scroll_area.setMaximumHeight(150)  # 增加最大高度
         self.result_scroll_area.setStyleSheet("""
             QScrollArea {
                 border: 1px solid #ddd;
@@ -2871,19 +3102,19 @@ class EnhancedMainWindow(QMainWindow):
         # 设置滚动区域的内容
         self.result_scroll_area.setWidget(result_content_widget)
         
-        # 按钮区域 - 固定在底部，优化高度
+        # 按钮区域 - 适当调整高度
         button_container = QWidget()
-        button_container.setFixedHeight(42)  # 减小按钮区域高度
+        button_container.setFixedHeight(36)  # 适当增加按钮区域高度
         button_layout = QHBoxLayout(button_container)
-        button_layout.setSpacing(10)
-        button_layout.setContentsMargins(5, 6, 5, 6)
+        button_layout.setSpacing(8)  # 增加按钮间距
+        button_layout.setContentsMargins(5, 5, 5, 5)  # 增加边距
         
         # 打开文件夹按钮
         self.open_result_btn = QPushButton("打开文件夹")
         self.open_result_btn.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         self.open_result_btn.setToolTip("打开输出文件夹")
-        self.open_result_btn.setFixedHeight(30)  # 减小按钮高度
-        self.open_result_btn.setMinimumWidth(100)
+        self.open_result_btn.setFixedHeight(28)  # 适当增加按钮高度
+        self.open_result_btn.setMinimumWidth(85)  # 适当增加按钮宽度
         self.open_result_btn.setStyleSheet("""
             QPushButton {
                 font-weight: bold;
@@ -2909,8 +3140,8 @@ class EnhancedMainWindow(QMainWindow):
         self.play_result_btn = QPushButton("播放视频")
         self.play_result_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.play_result_btn.setToolTip("播放处理后的视频")
-        self.play_result_btn.setFixedHeight(30)  # 减小按钮高度
-        self.play_result_btn.setMinimumWidth(100)
+        self.play_result_btn.setFixedHeight(28)  # 与打开文件夹按钮保持一致高度
+        self.play_result_btn.setMinimumWidth(85)  # 与打开文件夹按钮保持一致宽度
         self.play_result_btn.setStyleSheet("""
             QPushButton {
                 font-weight: bold;
@@ -3757,8 +3988,18 @@ class EnhancedMainWindow(QMainWindow):
         except:
             subtitle_mode = '硬字幕（烧录到视频）'
             
+        # 根据转换类型选择对应的发音人
+        if conversion_type in ["英文转英文", "中文转英文"]:
+            voice_type = self.voice_combo_en.currentText().split(' (')[0]
+        elif conversion_type in ["中文转中文", "英文转中文"]:
+            voice_type = self.voice_combo_cn.currentText().split(' (')[0]
+        else:  # 智能转换，传递两种发音人，让ProcessThread动态选择
+            voice_type = "auto_detect"  # 特殊标记，表示需要动态选择
+        
         voice_params = {
-            'voice_type': self.voice_combo.currentText().split(' - ')[0],
+            'voice_type': voice_type,
+            'voice_type_cn': self.voice_combo_cn.currentText().split(' (')[0],
+            'voice_type_en': self.voice_combo_en.currentText().split(' (')[0],
             'speed': self.speed_slider.value(),
             'volume': self.volume_slider.value(),
             'quality': self.quality_combo.currentText(),
