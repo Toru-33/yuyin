@@ -369,11 +369,17 @@ class FileInputWidget(QWidget):
         if event.mimeData().hasUrls() and len(event.mimeData().urls()) == 1:
             event.acceptProposedAction()
             self.path_label.setText("📥 可以松开鼠标了...")
+            # 设置拖拽激活状态样式
+            self.path_label.setProperty("drag-state", "active")
+            self.path_label.style().polish(self.path_label)
         else:
             event.ignore()
 
     def dragLeaveEvent(self, event: QDragLeaveEvent):
         self.path_label.setText(self.description)
+        # 移除拖拽状态样式
+        self.path_label.setProperty("drag-state", "")
+        self.path_label.style().polish(self.path_label)
 
     def dropEvent(self, event: QDropEvent):
         url = event.mimeData().urls()[0]
@@ -381,6 +387,9 @@ class FileInputWidget(QWidget):
         if os.path.isfile(path):
             self.set_path(path)
         self.path_label.setText(self.description)
+        # 移除拖拽状态样式
+        self.path_label.setProperty("drag-state", "")
+        self.path_label.style().polish(self.path_label)
 
     def mousePressEvent(self, event: QMouseEvent):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -467,10 +476,9 @@ class VideoPreviewDialog(QDialog):
         layout.addLayout(btn_layout)
     
     def loadVideoInfo(self):
-        """加载视频信息"""
+        """加载视频信息 - 修复依赖问题"""
         try:
             import os
-            from moviepy.editor import VideoFileClip
             
             # 基本文件信息
             file_name = os.path.basename(self.video_path)
@@ -480,44 +488,94 @@ class VideoPreviewDialog(QDialog):
             self.file_name_label.setText(file_name)
             self.size_label.setText(f"{size_mb:.1f} MB")
             
-            # 视频信息
+            # 方法1：尝试使用FFprobe（更可靠）
             try:
-                with VideoFileClip(self.video_path) as clip:
-                    duration = clip.duration
-                    fps = clip.fps if clip.fps else "未知"
-                    resolution = f"{clip.w}x{clip.h}" if clip.w and clip.h else "未知"
+                import subprocess
+                import json
+                
+                cmd = [
+                    'ffprobe', '-v', 'quiet', '-print_format', 'json', 
+                    '-show_format', '-show_streams', self.video_path
+                ]
+                
+                # 修复编码问题：使用bytes模式并处理编码
+                result = subprocess.run(
+                    cmd, 
+                    capture_output=True, 
+                    text=False,  # 使用bytes模式
+                    timeout=10,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                
+                if result.returncode == 0 and result.stdout:
+                    # 处理编码问题
+                    try:
+                        stdout_text = result.stdout.decode('utf-8')
+                    except UnicodeDecodeError:
+                        try:
+                            stdout_text = result.stdout.decode('gbk')
+                        except UnicodeDecodeError:
+                            stdout_text = result.stdout.decode('utf-8', errors='ignore')
                     
-                    minutes = int(duration // 60)
-                    seconds = int(duration % 60)
-                    self.duration_label.setText(f"{minutes}:{seconds:02d}")
-                    self.resolution_label.setText(resolution)
-                    self.fps_label.setText(f"{fps} FPS" if fps != "未知" else fps)
+                    data = json.loads(stdout_text)
                     
-                    # 音频信息
-                    if clip.audio:
-                        audio_fps = clip.audio.fps if hasattr(clip.audio, 'fps') else "未知"
-                        channels = clip.audio.nchannels if hasattr(clip.audio, 'nchannels') else "未知"
+                    # 查找视频流
+                    video_stream = None
+                    audio_stream = None
+                    
+                    for stream in data.get('streams', []):
+                        if stream.get('codec_type') == 'video' and video_stream is None:
+                            video_stream = stream
+                        elif stream.get('codec_type') == 'audio' and audio_stream is None:
+                            audio_stream = stream
+                    
+                    if video_stream:
+                        # 视频信息
+                        duration = float(data.get('format', {}).get('duration', 0))
+                        fps = video_stream.get('r_frame_rate', '0/1')
+                        if '/' in fps:
+                            num, den = fps.split('/')
+                            fps = float(num) / float(den) if float(den) != 0 else 0
                         
-                        self.sample_rate_label.setText(f"{audio_fps} Hz" if audio_fps != "未知" else audio_fps)
-                        self.channels_label.setText(f"{channels} 声道" if channels != "未知" else channels)
-                        self.audio_codec_label.setText("PCM/WAV")
-                    else:
-                        self.sample_rate_label.setText("无音频轨道")
-                        self.channels_label.setText("无音频轨道")
-                        self.audio_codec_label.setText("无音频轨道")
+                        width = video_stream.get('width', 0)
+                        height = video_stream.get('height', 0)
                         
-            except Exception as e:
-                self.duration_label.setText("无法获取")
-                self.resolution_label.setText("无法获取")
-                self.fps_label.setText("无法获取")
-                self.sample_rate_label.setText("无法获取")
-                self.channels_label.setText("无法获取")
-                self.audio_codec_label.setText("无法获取")
+                        minutes = int(duration // 60)
+                        seconds = int(duration % 60)
+                        self.duration_label.setText(f"{minutes}:{seconds:02d}")
+                        self.resolution_label.setText(f"{width}x{height}")
+                        self.fps_label.setText(f"{fps:.1f} FPS" if fps > 0 else "未知")
+                        
+                        # 音频信息
+                        if audio_stream:
+                            sample_rate = audio_stream.get('sample_rate', '未知')
+                            channels = audio_stream.get('channels', '未知')
+                            codec_name = audio_stream.get('codec_name', '未知')
+                            
+                            self.sample_rate_label.setText(f"{sample_rate} Hz" if sample_rate != '未知' else sample_rate)
+                            self.channels_label.setText(f"{channels} 声道" if channels != '未知' else channels)
+                            self.audio_codec_label.setText(codec_name.upper())
+                        else:
+                            self.sample_rate_label.setText("无音频轨道")
+                            self.channels_label.setText("无音频轨道")
+                            self.audio_codec_label.setText("无音频轨道")
+                        
+                        video_info_success = True
+                        print("✅ 使用FFprobe成功获取视频信息")
+                        
+            except Exception as ffprobe_error:
+                print(f"⚠️ FFprobe获取视频信息失败: {ffprobe_error}")
                 
             # 获取父窗口的转换设置
             if hasattr(self.parent(), 'conversion_combo'):
                 conversion_type = self.parent().conversion_combo.currentText()
-                voice_type = self.parent().voice_combo.currentText()
+                
+                # 根据转换类型选择正确的语音选择器
+                if conversion_type in ["中文转英文", "英文转英文"]:
+                    voice_type = self.parent().voice_combo_en.currentText().split(' (')[0]
+                else:
+                    voice_type = self.parent().voice_combo_cn.currentText().split(' (')[0]
+                    
                 speed = self.parent().speed_slider.value()
                 volume = self.parent().volume_slider.value()
                 quality = self.parent().quality_combo.currentText()
@@ -537,7 +595,7 @@ class VideoPreviewDialog(QDialog):
                 self.preview_info.setText(preview_text)
             
         except Exception as e:
-            QMessageBox.warning(self, "错误", f"无法读取视频信息: {str(e)}")
+            QMessageBox.warning(self, "错误", f"无法读取视频基本信息: {str(e)}\n\n请确保：\n1. 文件路径正确且文件存在\n2. 文件格式受支持\n3. 文件未被其他程序占用")
     
     def openInExplorer(self):
         """在文件管理器中打开文件"""
@@ -1727,538 +1785,102 @@ class ProcessThread(QThread):
 
     def embedSubtitles(self, video_file, original_subtitle_file, converted_subtitle_file=None, conversion_type="英文转英文", subtitle_mode="硬字幕（烧录到视频）"):
         """
-        [增强版] 支持软字幕和硬字幕两种嵌入方式
-        - 硬字幕：字幕烧录到视频画面（任何播放器都能看到）
+        [优化版] 使用优化后的addSrt模块进行字幕嵌入
+        - 硬字幕：字幕烧录到视频画面（使用drawtext等方法）
         - 软字幕：字幕作为独立轨道（可在播放器中控制开关）
-        - 同时生成：提供两种选择
+        - 双语字幕：支持标准语言代码和双语轨道
         """
-        import platform
-        import subprocess
-        import shutil
+        import addSrt
+        import os
         
         print(f"🎬 字幕嵌入模式: {subtitle_mode}")
         
-        # 检查FFmpeg是否可用
-        ffmpeg_path = self.get_ffmpeg_path()
-        if ffmpeg_path == 'ffmpeg' and not shutil.which('ffmpeg'):
-            print("致命错误: 在系统路径中找不到 ffmpeg。请确保已正确安装并配置环境变量。")
-            return False
-        
-        # 根据字幕模式选择处理方式
-        if subtitle_mode == "软字幕（独立字幕轨道）":
-            return self._embed_soft_subtitles(video_file, original_subtitle_file, converted_subtitle_file, conversion_type)
-        elif subtitle_mode == "同时生成硬字幕和软字幕":
-            # 先生成软字幕版本
-            soft_success = self._embed_soft_subtitles(video_file, original_subtitle_file, converted_subtitle_file, conversion_type, "_soft")
-            # 再生成硬字幕版本
-            hard_success = self._embed_hard_subtitles(video_file, original_subtitle_file, converted_subtitle_file, conversion_type, "_hard")
-            return soft_success or hard_success
-        else:  # 默认硬字幕模式
-            return self._embed_hard_subtitles(video_file, original_subtitle_file, converted_subtitle_file, conversion_type)
-    
-    def _embed_soft_subtitles(self, video_file, original_subtitle_file, converted_subtitle_file=None, conversion_type="英文转英文", suffix=""):
-        """嵌入软字幕（独立字幕轨道）"""
-        import subprocess
-        import os
-        
-        # 确定要使用的字幕文件
-        need_bilingual = conversion_type in ["中文转英文", "英文转中文"]
-        
-        if need_bilingual and converted_subtitle_file and os.path.exists(converted_subtitle_file):
-            print(f"🎬 生成双语软字幕: {video_file}")
-            bilingual_subtitle = self.createBilingualSubtitle(
-                original_subtitle_file, converted_subtitle_file, conversion_type
-            )
-            subtitle_file = bilingual_subtitle if bilingual_subtitle else converted_subtitle_file
-        else:
-            subtitle_file = converted_subtitle_file if converted_subtitle_file and os.path.exists(converted_subtitle_file) else original_subtitle_file
-        
-        if not os.path.exists(subtitle_file):
-            print(f"❌ 字幕文件不存在: {subtitle_file}")
-            return False
-        
-        # 生成输出文件名
+        # 确定输出文件路径
         video_dir = os.path.dirname(video_file)
         video_name = os.path.splitext(os.path.basename(video_file))[0]
-        output_with_subs = os.path.join(video_dir, f"{video_name}{suffix}_with_subtitles.mp4")
-        
-        print(f"🎬 开始嵌入软字幕...")
-        print(f"   输入视频: {video_file}")
-        print(f"   字幕文件: {subtitle_file}")
-        print(f"   输出文件: {output_with_subs}")
-        
-        # FFmpeg命令：将字幕作为独立流嵌入
-        ffmpeg_path = self.get_ffmpeg_path()
-        cmd = [
-            ffmpeg_path, '-y',
-            '-i', video_file,
-            '-i', subtitle_file,
-            '-c:v', 'copy',  # 视频流不重编码
-            '-c:a', 'copy',  # 音频流不重编码
-            '-c:s', 'mov_text',  # 字幕编码为mov_text（MP4兼容）
-            '-map', '0:v',  # 映射视频流
-            '-map', '0:a',  # 映射音频流
-            '-map', '1:s',  # 映射字幕流
-            '-disposition:s:0', 'default',  # 设置字幕为默认
-            '-metadata:s:s:0', f'language=zh',  # 设置字幕语言
-            output_with_subs
-        ]
-        
-        try:
-            print(f"🎬 执行软字幕嵌入命令...")
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
-            
-            if result.returncode == 0 and os.path.exists(output_with_subs) and os.path.getsize(output_with_subs) > 0:
-                print(f"✅ 软字幕嵌入成功: {output_with_subs}")
-                return True
-            else:
-                print(f"❌ 软字幕嵌入失败")
-                print(f"   返回码: {result.returncode}")
-                print(f"   错误信息: {result.stderr}")
-                return False
-                
-        except Exception as e:
-            print(f"❌ 软字幕嵌入异常: {e}")
-            return False
-    
-    def _embed_hard_subtitles(self, video_file, original_subtitle_file, converted_subtitle_file=None, conversion_type="英文转英文", suffix=""):
-        """嵌入硬字幕（烧录到画面）"""
-        import platform
-        import subprocess
-        import shutil
-        import os
         
         # 检查是否需要双语字幕
         need_bilingual = conversion_type in ["中文转英文", "英文转中文"]
         
         if need_bilingual and converted_subtitle_file and os.path.exists(converted_subtitle_file):
-            # 双语字幕模式
-            print(f"开始嵌入双语字幕到视频: {video_file}")
-            print(f"原始字幕: {original_subtitle_file}")
-            print(f"转换字幕: {converted_subtitle_file}")
+            # 双语字幕处理
+            print(f"🌐 准备双语字幕嵌入...")
             
-            # 创建双语字幕文件
-            bilingual_subtitle = self.createBilingualSubtitle(
-                original_subtitle_file, converted_subtitle_file, conversion_type
+            # 使用与主处理流程相同的文件名，确保路径统一
+            output_file = video_file  # 直接覆盖输入的视频文件
+            
+            # 备份双语字幕版本（保留带后缀的文件）
+            conversion_suffix = conversion_type.replace("转", "_to_").replace("中文", "cn").replace("英文", "en")
+            bilingual_backup = os.path.join(video_dir, f"{video_name}_{conversion_suffix}_bilingual.mp4")
+            
+            # 使用addSrt的增强版双语字幕功能
+            result = addSrt.run_with_bilingual_subtitle_enhanced(
+                video_file,
+                original_subtitle_file,
+                converted_subtitle_file,
+                output_file,
+                conversion_type,
+                subtitle_mode
             )
-            if bilingual_subtitle:
-                subtitle_file = bilingual_subtitle
-            else:
-                print("双语字幕创建失败，使用转换后的字幕")
-                subtitle_file = converted_subtitle_file
-        else:
-            # 单语字幕模式
-            subtitle_file = converted_subtitle_file if converted_subtitle_file and os.path.exists(converted_subtitle_file) else original_subtitle_file
-        
-        # 严格检查字幕文件是否存在和可读
-        if not os.path.exists(subtitle_file):
-            print(f"❌ 字幕文件不存在: {subtitle_file}")
-            print(f"   当前工作目录: {os.getcwd()}")
-            print(f"   文件绝对路径: {os.path.abspath(subtitle_file)}")
-            return False  # 字幕文件不存在是关键错误
-        
-        if not os.path.isfile(subtitle_file):
-            print(f"❌ 路径不是文件: {subtitle_file}")
-            return False
-        
-        if not os.access(subtitle_file, os.R_OK):
-            print(f"❌ 字幕文件无读取权限: {subtitle_file}")
-            return False
-        
-        # 检查文件大小
-        file_size = os.path.getsize(subtitle_file)
-        if file_size == 0:
-            print(f"❌ 字幕文件为空: {subtitle_file}")
-            return False
             
-        print(f"✅ 字幕文件验证通过: {subtitle_file} (大小: {file_size} 字节)")
-        
-        # 验证字幕文件格式
-        if not self.validateSubtitleFormat(subtitle_file):
-            print(f"⚠️ 字幕文件格式验证失败，但仍尝试嵌入: {subtitle_file}")
-            # 不返回False，给用户一个尝试的机会
-
-        try:
-            # 为ffmpeg滤镜正确地转义文件路径 (核心修复)
-            def sanitize_path_for_ffmpeg(path):
-                """专门为ffmpeg的filter语法转义路径，特别是处理中文路径。"""
-                if platform.system() == 'Windows':
-                    # 获取绝对路径并标准化
-                    abs_path = os.path.abspath(path)
-                    
-                    # 将反斜杠转换为正斜杠（ffmpeg支持正斜杠）
-                    normalized_path = abs_path.replace('\\', '/')
-                    
-                    # 只转义在ffmpeg filter中有特殊意义的字符
-                    # 不要转义Windows路径中的冒号，因为这会破坏路径格式
-                    escaped_path = normalized_path.replace("'", "\\'").replace('"', '\\"')
-                    
-                    # 如果路径包含空格或特殊字符，整个路径需要用单引号包围
-                    # 这在后面的ffmpeg命令中处理
-                    
-                    print(f"📁 路径转义: {path} -> {escaped_path}")
-                    return escaped_path
-                else:
-                    # Linux/Mac路径处理
-                    abs_path = os.path.abspath(path)
-                    # 转义单引号和双引号
-                    escaped_path = abs_path.replace("'", "\\'").replace('"', '\\"')
-                    return escaped_path
-
-            # 对字幕文件路径进行转义
-            sanitized_subtitle_path = sanitize_path_for_ffmpeg(subtitle_file)
-            
-            # 构建健壮的ffmpeg命令 - 简化路径处理逻辑
-            video_dir = os.path.dirname(video_file)
-            video_name = os.path.splitext(os.path.basename(video_file))[0]
-            
-            # 使用UUID确保临时输出文件名唯一性
-            import uuid
-            unique_id = str(uuid.uuid4())[:8]
-            output_with_subs = os.path.join(video_dir, f"{video_name}_subs_{unique_id}_temp.mp4").replace('\\', '/')
-            
-            print(f"📁 视频文件: {video_file}")
-            print(f"📁 字幕文件: {subtitle_file}")
-            print(f"📁 临时输出: {output_with_subs}")
-            print(f"📁 转义后字幕路径: {sanitized_subtitle_path}")
-            
-            # 检查输出目录是否存在和可写
-            output_dir = os.path.dirname(output_with_subs)
-            if not os.path.exists(output_dir):
-                try:
-                    os.makedirs(output_dir, exist_ok=True)
-                    print(f"✅ 创建输出目录: {output_dir}")
-                except Exception as e:
-                    print(f"❌ 创建输出目录失败: {e}")
-                return False
-            
-            if not os.access(output_dir, os.W_OK):
-                print(f"❌ 输出目录无写入权限: {output_dir}")
-                return False
-            
-            # 如果临时文件已存在，先删除
-            if os.path.exists(output_with_subs):
-                try:
-                    os.remove(output_with_subs)
-                    print(f"🗑️ 已删除旧的临时文件: {output_with_subs}")
-                except Exception as e:
-                    print(f"⚠️ 无法删除旧临时文件: {e}")
-            
-            # 处理字幕文件路径的中文字符问题
-            working_subtitle_path = subtitle_file
-            temp_subtitle_file = None
-            
-            if any('\u4e00' <= char <= '\u9fff' for char in subtitle_file):
-                # 如果字幕文件路径包含中文，复制到视频目录下的简单文件名
-                import shutil
-                import uuid
-                # 使用UUID确保文件名唯一性，避免冲突
-                unique_id = str(uuid.uuid4())[:8]
-                temp_subtitle_file = os.path.join(video_dir, f"temp_sub_{unique_id}.srt").replace('\\', '/')
-                try:
-                    shutil.copy2(subtitle_file, temp_subtitle_file)
-                    working_subtitle_path = temp_subtitle_file
-                    sanitized_subtitle_path = sanitize_path_for_ffmpeg(temp_subtitle_file)
-                    print(f"📋 已复制字幕到无中文路径: {temp_subtitle_file}")
-                except Exception as e:
-                    print(f"❌ 复制字幕文件失败: {e}")
-                return False
-            
-            style_options = "FontName=Microsoft YaHei,FontSize=22,PrimaryColour=&H00FFFFFF,SecondaryColour=&H00000000,OutlineColour=&H00000000,BackColour=&H80000000,Bold=0,Italic=0,Underline=0,StrikeOut=0,ScaleX=100,ScaleY=100,Spacing=0,Angle=0,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginL=10,MarginR=10,MarginV=20"
-
-            # 修复ffmpeg字幕滤镜语法 - 彻底修复版
-            if platform.system() == 'Windows':
-                # Windows路径处理：使用反斜杠转义特殊字符
-                filter_path = working_subtitle_path.replace('\\', '\\\\').replace(':', '\\:')
-            else:
-                # Linux/Mac路径处理：转义冒号和反斜杠
-                filter_path = working_subtitle_path.replace('\\', '\\\\').replace(':', '\\:')
-            
-            # Windows下FFmpeg字幕嵌入命令构建
-            print(f"🎬 构建FFmpeg字幕嵌入命令")
-            
-            # Windows下的路径处理：将反斜杠替换为正斜杠，并转义冒号
-            filter_path = working_subtitle_path.replace('\\', '/').replace(':', '\\:')
-            
-            # 构建字幕滤镜，使用简单的样式设置
-            vf_filter = f"subtitles='{filter_path}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Bold=1'"
-            
-            # 检查FFmpeg是否存在
-            ffmpeg_path = self.get_ffmpeg_path()
-            
-            cmd = [
-                ffmpeg_path, '-y',
-                '-i', video_file,
-                '-vf', vf_filter,
-                '-c:a', 'copy',
-                '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '23',
-                output_with_subs
-            ]
-            
-            print(f"✅ 字幕嵌入命令构建成功")
-            print(f"   FFmpeg路径: {ffmpeg_path}")
-            print(f"   滤镜路径: {filter_path}")
-            print(f"   滤镜字符串: {vf_filter}")
-            print(f"   完整命令: {' '.join(cmd)}")
-            
-            # FFmpeg执行前的最终检查
-            print(f"🔍 FFmpeg执行前最终检查:")
-            print(f"   输入视频: {video_file}")
-            print(f"     - 文件存在: {os.path.exists(video_file)}")
-            print(f"     - 可读权限: {os.access(video_file, os.R_OK)}")
-            print(f"     - 文件大小: {os.path.getsize(video_file) if os.path.exists(video_file) else 0} 字节")
-            
-            print(f"   字幕文件: {working_subtitle_path}")
-            print(f"     - 文件存在: {os.path.exists(working_subtitle_path)}")
-            print(f"     - 可读权限: {os.access(working_subtitle_path, os.R_OK)}")
-            print(f"     - 文件大小: {os.path.getsize(working_subtitle_path) if os.path.exists(working_subtitle_path) else 0} 字节")
-            
-            print(f"   输出文件: {output_with_subs}")
-            print(f"     - 输出目录存在: {os.path.exists(os.path.dirname(output_with_subs))}")
-            print(f"     - 输出目录可写: {os.access(os.path.dirname(output_with_subs), os.W_OK)}")
-            
-            print(f"   滤镜字符串: {vf_filter}")
-            print(f"   完整命令: {' '.join(cmd)}")
-            
-            # 再次验证关键文件存在
-            if not os.path.exists(video_file):
-                print(f"❌ 致命错误：输入视频不存在: {video_file}")
-                return False
+            if result['success'] and os.path.exists(output_file):
+                print(f"✅ 双语字幕嵌入成功: {output_file}")
                 
-            if not os.path.exists(working_subtitle_path):
-                print(f"❌ 致命错误：字幕文件不存在: {working_subtitle_path}")
-                return False
-            
-            print(f"✅ 所有检查通过，开始执行FFmpeg...")
-            
-            # 执行命令并提供清晰的错误反馈
-            try:
-                print(f"🚀 正在执行FFmpeg命令...")
-                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
-                
-                # 立即输出FFmpeg的执行结果，无论成功失败
-                print(f"📊 FFmpeg执行完成，返回码: {result.returncode}")
-                if result.stdout:
-                    print(f"📝 FFmpeg标准输出:\n{result.stdout}")
-                if result.stderr:
-                    print(f"📝 FFmpeg错误输出:\n{result.stderr}")
-                    
-            except subprocess.TimeoutExpired:
-                print(f"❌ FFmpeg执行超时（10分钟）")
-                return False
-            except Exception as e:
-                print(f"❌ FFmpeg执行异常: {e}")
-                import traceback
-                traceback.print_exc()
-                return False
-
-            # 清理临时字幕文件
-            if temp_subtitle_file and os.path.exists(temp_subtitle_file):
+                # 处理备份文件
                 try:
-                    os.remove(temp_subtitle_file)
-                    print(f"🗑️ 已清理临时字幕文件: {temp_subtitle_file}")
+                    # 如果创建了双语字幕文件，显示信息
+                    if result['bilingual_subtitle_file']:
+                        print(f"📋 双语字幕文件已保存: {result['bilingual_subtitle_file']}")
+                        
+                    # 复制一份带后缀的视频版本作为备份
+                    import shutil
+                    shutil.copy2(output_file, bilingual_backup)
+                    print(f"📋 双语字幕视频备份已保存: {bilingual_backup}")
                 except Exception as e:
-                    print(f"⚠️ 清理临时字幕文件失败: {e}")
-
-            # 检查执行结果
-            print(f"🔍 检查FFmpeg执行结果:")
-            print(f"   - 返回码: {result.returncode}")
-            print(f"   - 输出文件存在: {os.path.exists(output_with_subs) if 'output_with_subs' in locals() else 'N/A'}")
-            print(f"   - 输出文件大小: {os.path.getsize(output_with_subs) if os.path.exists(output_with_subs) else 0} 字节")
-
-            if result.returncode == 0 and os.path.exists(output_with_subs) and os.path.getsize(output_with_subs) > 0:
-                print(f"✅ 字幕嵌入成功，临时文件为: {output_with_subs}")
-                # 用带字幕的视频替换原文件
-                try:
-                    os.replace(output_with_subs, video_file)
-                    print(f"✅ 最终文件已更新: {video_file}")
-                except Exception as e:
-                    print(f"❌ 替换原文件失败: {e}")
-                    return False
-                
-                # 清理临时双语字幕文件
-                if need_bilingual and 'bilingual_subtitle' in locals() and os.path.exists(bilingual_subtitle):
-                    try:
-                        os.remove(bilingual_subtitle)
-                        print("✅ 临时双语字幕文件已清理")
-                    except Exception as e:
-                        print(f"⚠️ 清理临时双语字幕失败: {e}")
-                
+                    print(f"⚠️ 双语字幕备份处理失败: {e}")
                 return True
             else:
-                # 详细的失败分析
-                print("❌ 字幕嵌入失败!")
-                print(f"   返回码: {result.returncode}")
-                
-                # 分析具体原因
-                if result.returncode != 0:
-                    print(f"❌ FFmpeg执行失败，返回码: {result.returncode}")
-                    
-                    # 常见错误分析
-                    error_msg = result.stderr.lower() if result.stderr else ""
-                    if "no such file or directory" in error_msg:
-                        print("🔍 原因分析：文件路径问题")
-                    elif "invalid argument" in error_msg:
-                        print("🔍 原因分析：命令参数无效")
-                    elif "permission denied" in error_msg:
-                        print("🔍 原因分析：文件权限问题")
-                    elif "codec" in error_msg:
-                        print("🔍 原因分析：编解码器问题")
-                    elif "format" in error_msg:
-                        print("🔍 原因分析：文件格式问题")
-                    else:
-                        print("🔍 原因分析：未知错误，请检查FFmpeg安装")
-                
-                if not os.path.exists(output_with_subs):
-                    print(f"❌ 输出文件未生成: {output_with_subs}")
-                elif os.path.getsize(output_with_subs) == 0:
-                    print(f"❌ 输出文件为空: {output_with_subs}")
-                
-                return False
-                
-        except subprocess.TimeoutExpired:
-            print("❌ 字幕嵌入超时（10分钟），跳过此步骤。视频文件可能过大或系统性能不足。")
-            return False
-        except Exception as e:
-            print(f"❌ 嵌入字幕时发生未知Python异常: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def validateSubtitleFormat(self, subtitle_file):
-        """验证字幕文件格式是否正确"""
-        try:
-            # 尝试多种编码读取字幕文件
-            content = ""
-            for encoding in ['utf-8', 'gbk', 'windows-1252', 'latin-1']:
-                try:
-                    with open(subtitle_file, 'r', encoding=encoding) as f:
-                        content = f.read()
-                    break
-                except UnicodeDecodeError:
-                    continue
+                error_msg = result.get('error', '未知错误')
+                print(f"❌ 双语字幕嵌入失败: {error_msg}，尝试单语字幕")
+                # 回退到单语字幕
+                need_bilingual = False
+        
+        if not need_bilingual:
+            # 单语字幕处理
+            print(f"📋 准备单语字幕嵌入...")
             
-            if not content:
-                print(f"❌ 无法读取字幕文件: {subtitle_file}")
+            # 选择要使用的字幕文件（优先使用转换后的字幕）
+            subtitle_file = converted_subtitle_file if converted_subtitle_file and os.path.exists(converted_subtitle_file) else original_subtitle_file
+            
+            if not os.path.exists(subtitle_file):
+                print(f"❌ 字幕文件不存在: {subtitle_file}")
                 return False
             
-            # 基本的SRT格式验证
-            lines = content.strip().split('\n')
-            if len(lines) < 3:
-                print(f"❌ 字幕文件太短，不符合SRT格式: {subtitle_file}")
-                return False
+            # 生成输出文件名
+            mode_suffix = "_hard_subtitles" if subtitle_mode == "硬字幕（烧录到视频）" else "_soft_subtitles"
+            output_file = os.path.join(video_dir, f"{video_name}{mode_suffix}.mp4")
             
-            # 检查是否包含时间标记
-            has_time_format = False
-            for line in lines:
-                if '-->' in line:
-                    has_time_format = True
-                    # 验证时间格式 (HH:MM:SS,mmm --> HH:MM:SS,mmm)
-                    import re
-                    # 更灵活的时间格式验证，支持毫秒位数为1-3位
-                    time_pattern = r'\d{2}:\d{2}:\d{2},\d{1,3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{1,3}'
-                    if not re.match(time_pattern, line.strip()):
-                        print(f"⚠️ 时间格式可能不标准: {line.strip()}")
-                    break
+            # 确定是否使用硬字幕
+            is_hard_subtitle = subtitle_mode == "硬字幕（烧录到视频）"
             
-            if not has_time_format:
-                print(f"❌ 字幕文件缺少时间标记: {subtitle_file}")
-                return False
+            # 使用addSrt的单语字幕功能
+            success = addSrt.run(
+                video_file,
+                subtitle_file,
+                output_file,
+                hard_subtitle=is_hard_subtitle
+            )
             
-            print(f"✅ 字幕文件格式验证通过: {subtitle_file}")
-            return True
-            
-        except Exception as e:
-            print(f"❌ 字幕文件验证异常: {e}")
-            return False
-    
-    def createBilingualSubtitle(self, original_subtitle, converted_subtitle, conversion_type):
-        """创建双语字幕文件"""
-        try:
-            # 读取原始字幕和转换字幕
-            with open(original_subtitle, 'r', encoding='utf-8') as f:
-                original_content = f.read()
-            
-            with open(converted_subtitle, 'r', encoding='utf-8') as f:
-                converted_content = f.read()
-            
-            # 解析字幕
-            original_subtitles = self.parseSubtitleContent(original_content)
-            converted_subtitles = self.parseSubtitleContent(converted_content)
-            
-            # 创建双语字幕
-            bilingual_subtitles = []
-            
-            # 确定显示顺序（中文在上，英文在下）
-            if conversion_type == "中文转英文":
-                # 中文(原始) -> 英文(转换)
-                first_lang_subs = original_subtitles
-                second_lang_subs = converted_subtitles
-            else:  # 英文转中文
-                # 中文(转换) -> 英文(原始)  
-                first_lang_subs = converted_subtitles
-                second_lang_subs = original_subtitles
-            
-            # 合并字幕
-            for i, (time_info, original_text) in enumerate(first_lang_subs):
-                converted_text = second_lang_subs[i][1] if i < len(second_lang_subs) else ""
-                
-                # 组合双语文本
-                bilingual_text = f"{original_text}\n{converted_text}"
-                bilingual_subtitles.append((time_info, bilingual_text))
-            
-            # 生成双语字幕文件
-            bilingual_file = original_subtitle.replace('.srt', '_bilingual.srt')
-            
-            with open(bilingual_file, 'w', encoding='utf-8') as f:
-                for i, (time_info, text) in enumerate(bilingual_subtitles):
-                    f.write(f"{i+1}\n")
-                    f.write(f"{time_info}\n")
-                    f.write(f"{text}\n\n")
-            
-            print(f"✅ 双语字幕文件已创建: {bilingual_file}")
-            return bilingual_file
-            
-        except Exception as e:
-            print(f"❌ 创建双语字幕失败: {e}")
-            return None
-    
-    def parseSubtitleContent(self, content):
-        """解析字幕内容"""
-        subtitles = []
-        lines = content.strip().split('\n')
-            
-        i = 0
-        while i < len(lines):
-            if lines[i].strip().isdigit():
-                # 序号行
-                i += 1
-                if i < len(lines) and '-->' in lines[i]:
-                    # 时间行
-                    time_info = lines[i].strip()
-                    i += 1
-                    
-                    # 文本行
-                    text_lines = []
-                    while i < len(lines) and lines[i].strip() and not lines[i].strip().isdigit():
-                        text_lines.append(lines[i].strip())
-                        i += 1
-                        
-                        if text_lines:
-                            text = ' '.join(text_lines)
-                            subtitles.append((time_info, text))
-                    
-                    # 跳过空行
-                    while i < len(lines) and not lines[i].strip():
-                        i += 1
-                else:
-                    i += 1
+            if success and os.path.exists(output_file):
+                mode_text = "硬字幕" if is_hard_subtitle else "软字幕"
+                print(f"✅ {mode_text}嵌入成功: {output_file}")
+                return True
             else:
-                i += 1
-            
-        return subtitles
+                mode_text = "硬字幕" if is_hard_subtitle else "软字幕"
+                print(f"❌ {mode_text}嵌入失败")
+                return False
+        
+        return False
 
     def pause(self):
         """暂停处理"""
@@ -2394,7 +2016,7 @@ class EnhancedMainWindow(QMainWindow):
         QMessageBox.information(self, "配置更新", "设置已更新并应用到主界面和批量处理界面")
         
     def setupUi(self):
-        self.setWindowTitle("智能多语言视频语音转换系统")
+        self.setWindowTitle("智能双语视频语音转换系统")
         # 使用自定义应用程序图标
         try:
             custom_icon = app_icon.create_app_icon()
@@ -2841,7 +2463,7 @@ class EnhancedMainWindow(QMainWindow):
         app_icon.setAlignment(Qt.AlignCenter)
         
         # 主标题
-        title_label = QLabel("智能视频语音转换系统")
+        title_label = QLabel("智能双语视频语音转换系统")
         title_label.setObjectName("titleLabel")
         title_label.setAlignment(Qt.AlignCenter)
         
@@ -3061,85 +2683,6 @@ class EnhancedMainWindow(QMainWindow):
     def onVolumeChanged(self, value):
         """音量滑块变化处理（数值框已删除）"""
         pass
-
-    def createProgressSection(self):
-        group = QGroupBox("3. 查看进度")
-        group.setObjectName("progressSection")
-        layout = QVBoxLayout(group)
-        
-        # 进度条 - 不需要额外图标
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setTextVisible(False)
-        
-        # 状态显示 - 不需要额外图标
-        self.status_label = QLabel("准备就绪")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setObjectName("statusLabel")
-        
-        layout.addWidget(QLabel("进度:"))
-        layout.addWidget(self.progress_bar)
-        layout.addWidget(self.status_label)
-        return group
-
-    def createButtonSection(self):
-        """创建按钮区域 - 精简图标，只保留核心功能图标"""
-        group = QGroupBox("4. 操作控制")
-        group.setObjectName("buttonSection")
-        layout = QHBoxLayout(group)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(12)
-        
-        # 主操作按钮 - 保留播放图标
-        self.process_btn = QPushButton("开始转换")
-        self.process_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.process_btn.setObjectName("processButton")
-        self.process_btn.setFixedHeight(40)
-        self.process_btn.setMinimumWidth(120)
-        self.process_btn.clicked.connect(self.startProcessing)
-        
-        # 停止/暂停按钮 - 支持暂停和恢复
-        self.stop_btn = QPushButton("停止")
-        self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-        self.stop_btn.setObjectName("stopButton")
-        self.stop_btn.setFixedHeight(35)
-        self.stop_btn.setFixedWidth(80)
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.toggleProcessing)
-        
-        # 记录当前处理状态
-        self.is_processing = False
-        self.is_paused = False
-        
-        # 其他按钮 - 移除图标，保持简洁
-        self.preview_btn = QPushButton("预览")
-        self.preview_btn.setObjectName("previewButton")
-        self.preview_btn.setFixedHeight(35)
-        self.preview_btn.setFixedWidth(80)
-        self.preview_btn.clicked.connect(self.openPreview)
-        
-        self.settings_btn = QPushButton("设置")
-        self.settings_btn.setObjectName("settingsButton")
-        self.settings_btn.setFixedHeight(35)
-        self.settings_btn.setFixedWidth(80)
-        self.settings_btn.clicked.connect(self.openSettings)
-        
-        self.batch_btn = QPushButton("批量")
-        self.batch_btn.setObjectName("batchButton")
-        self.batch_btn.setFixedHeight(35)
-        self.batch_btn.setFixedWidth(80)
-        self.batch_btn.clicked.connect(self.openBatchProcessor)
-        
-        layout.addStretch()
-        layout.addWidget(self.process_btn)
-        layout.addSpacing(10)
-        layout.addWidget(self.stop_btn)
-        layout.addSpacing(20)
-        layout.addWidget(self.preview_btn)
-        layout.addWidget(self.settings_btn)
-        layout.addWidget(self.batch_btn)
-        layout.addStretch()
-        
-        return group
 
     def createProgressAndButtonSection(self):
         """创建合并的进度和按钮区域 - 调整高度平衡"""
@@ -4000,52 +3543,70 @@ class EnhancedMainWindow(QMainWindow):
             self.load_stylesheet("style.qss")
     
     def calculateEstimatedTime(self):
-        """计算预估处理时间（优化版本）"""
+        """计算预估处理时间（基于实际处理复杂度的现实版本）"""
         try:
             if not self.video_path:
                 return "无法估算"
             
-            # 快速获取文件大小，避免UI阻塞
+            # 获取文件大小和基础信息
             file_size_mb = os.path.getsize(self.video_path) / (1024 * 1024)
             
-            # 优化的时间估算算法
-            # 1. 基础处理时间：每30MB约1分钟（比原来的20MB更加乐观）
-            base_minutes = max(0.5, file_size_mb / 30)  # 最少30秒
-            
-            # 2. 根据文件大小调整策略
-            if file_size_mb < 100:  # 小文件（<100MB）
-                base_minutes *= 0.6  # 小文件处理相对更快
-            elif file_size_mb > 500:  # 大文件（>500MB）
-                base_minutes *= 1.2  # 大文件需要更多时间
-            
-            # 3. 转换类型影响（降低倍数）
+            # 基于实际处理步骤的时间估算
             conversion_type = self.conversion_combo.currentText()
-            if "翻译" in conversion_type or conversion_type == "智能转换":
-                base_minutes *= 1.5  
-            elif conversion_type == "英文转英文" or conversion_type == "中文转中文":
-                base_minutes *= 0.8  # 同语言转换更快
-            
-            # 4. 质量影响（微调）
             quality = self.quality_combo.currentText()
-            quality_multiplier = {
-                "标准质量": 0.7,  # 从0.8降到0.7
-                "高质量": 1.0,
-                "超清质量": 1.2   # 从1.3降到1.2
-            }.get(quality, 1.0)
-            base_minutes *= quality_multiplier
-            
-            # 5. 语速影响（新增）
             speed = self.speed_slider.value()
-            if speed > 120:  # 语速快时处理稍慢
-                base_minutes *= 1.1
-            elif speed < 80:  # 语速慢时处理稍快
-                base_minutes *= 0.95
             
-            # 6. 确保合理范围：最少20秒，最多15分钟（比原来的30分钟更乐观）
-            base_minutes = max(0.33, min(15, base_minutes))
+            # 1. 视频解码和音频提取时间：每100MB约30秒
+            decode_time = max(0.5, file_size_mb / 100 * 0.5)
+            
+            # 2. 语音识别时间：每MB约6秒（这是最耗时的步骤）
+            recognition_time = file_size_mb * 0.1  # 每MB约6秒，但按保守估算
+            
+            # 3. 文本翻译时间（如果需要）
+            translation_time = 0
+            if "翻译" in conversion_type or conversion_type == "智能转换":
+                translation_time = max(0.3, file_size_mb * 0.02)  # 每MB约1.2秒
+            
+            # 4. 语音合成时间：根据文本量和质量
+            synthesis_base = file_size_mb * 0.05  # 基础合成时间
+            quality_multiplier = {
+                "标准质量": 0.8,
+                "高质量": 1.0, 
+                "超清质量": 1.3
+            }.get(quality, 1.0)
+            synthesis_time = synthesis_base * quality_multiplier
+            
+            # 5. 视频编码和字幕嵌入时间：每100MB约1分钟
+            encoding_time = max(0.3, file_size_mb / 100 * 1.0)
+            
+            # 6. 双语字幕额外时间（如果需要）
+            bilingual_time = 0
+            if conversion_type in ["中文转英文", "英文转中文"]:
+                bilingual_time = max(0.2, file_size_mb * 0.01)  # 额外的双语处理时间
+            
+            # 7. 系统开销和缓冲时间
+            overhead_time = max(0.5, (decode_time + recognition_time + synthesis_time + encoding_time) * 0.2)
+            
+            # 总时间计算
+            total_minutes = decode_time + recognition_time + translation_time + synthesis_time + encoding_time + bilingual_time + overhead_time
+            
+            # 根据文件大小调整
+            if file_size_mb < 50:  # 小文件
+                total_minutes *= 0.8
+            elif file_size_mb > 300:  # 大文件
+                total_minutes *= 1.2
+            
+            # 语速影响合成时间
+            if speed > 120:
+                total_minutes *= 1.1
+            elif speed < 80:
+                total_minutes *= 0.95
+            
+            # 合理范围控制：最少1分钟，最多45分钟
+            total_minutes = max(1.0, min(45, total_minutes))
             
             # 格式化显示
-            total_seconds = int(base_minutes * 60)
+            total_seconds = int(total_minutes * 60)
             if total_seconds < 60:
                 return f"{total_seconds}秒"
             elif total_seconds < 3600:
@@ -4062,7 +3623,7 @@ class EnhancedMainWindow(QMainWindow):
                 
         except Exception as e:
             print(f"计算预估时间失败: {e}")
-            return "2-5分钟"  # "2-5分钟"
+            return "5-15分钟"  # 更现实的默认估计
     
     def parseTimeToSeconds(self, time_str):
         """将时间字符串转换为秒数"""
@@ -4235,8 +3796,18 @@ class EnhancedMainWindow(QMainWindow):
         if self.process_thread and self.process_thread.isRunning():
             self.process_thread.pause()
             self.is_paused = True
-            self.stop_btn.setText("继续")
-            self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            # 暂停后：停止按钮变成停止，开始按钮变成继续
+            self.stop_btn.setText("停止")
+            self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+            self.stop_btn.clicked.disconnect()  # 断开暂停逻辑
+            self.stop_btn.clicked.connect(self.stopProcessing)  # 连接停止逻辑
+            
+            self.process_btn.setText("继续")
+            self.process_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.process_btn.setEnabled(True)
+            self.process_btn.clicked.disconnect()  # 断开开始逻辑
+            self.process_btn.clicked.connect(self.resumeProcessing)  # 连接继续逻辑
+            
             self.status_label.setText("处理已暂停，点击继续按钮恢复")
             
             # 暂停进度定时器
@@ -4248,8 +3819,18 @@ class EnhancedMainWindow(QMainWindow):
         if self.process_thread and self.process_thread.isRunning():
             self.process_thread.resume()
             self.is_paused = False
+            # 恢复后：停止按钮变成暂停，开始按钮恢复禁用
             self.stop_btn.setText("暂停")
             self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.stop_btn.clicked.disconnect()  # 断开停止逻辑
+            self.stop_btn.clicked.connect(self.toggleProcessing)  # 连接暂停逻辑
+            
+            self.process_btn.setText("开始转换")
+            self.process_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.process_btn.setEnabled(False)
+            self.process_btn.clicked.disconnect()  # 断开继续逻辑
+            self.process_btn.clicked.connect(self.startProcessing)  # 恢复开始逻辑
+            
             self.status_label.setText("处理已恢复...")
             
             # 恢复进度定时器
@@ -4262,7 +3843,17 @@ class EnhancedMainWindow(QMainWindow):
             self.process_thread.stop()
             self.status_label.setText("正在停止，请稍候...")
             self.stop_btn.setEnabled(False) # 防止重复点击
+            self.process_btn.setEnabled(False) # 同时禁用开始按钮
             self.is_paused = False
+            
+            # 恢复按钮文本和连接
+            self.process_btn.setText("开始转换")
+            self.process_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            try:
+                self.process_btn.clicked.disconnect()
+            except:
+                pass
+            self.process_btn.clicked.connect(self.startProcessing)
             
         # 停止进度定时器
         if hasattr(self, 'progress_timer') and self.progress_timer.isActive():
@@ -4411,9 +4002,25 @@ class EnhancedMainWindow(QMainWindow):
         self.process_btn.setEnabled(enabled)
         self.stop_btn.setEnabled(not enabled)
         
-        # 恢复处理按钮文本
+        # 恢复处理按钮文本和连接
         if enabled:
             self.process_btn.setText("开始转换")
+            self.process_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            # 重新连接开始逻辑（处理完成后可能被断开）
+            try:
+                self.process_btn.clicked.disconnect()
+            except:
+                pass
+            self.process_btn.clicked.connect(self.startProcessing)
+            
+            # 重置停止按钮
+            self.stop_btn.setText("停止")
+            self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+            try:
+                self.stop_btn.clicked.disconnect()
+            except:
+                pass
+            self.stop_btn.clicked.connect(self.toggleProcessing)
         
         self.file_input_widget.setEnabled(enabled)
         self.conversion_combo.setEnabled(enabled)

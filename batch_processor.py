@@ -468,6 +468,119 @@ class BatchProcessThread(QThread):
                 
                 return False, error_msg
             
+            # 4. 字幕嵌入处理
+            if generated_video_path and os.path.exists(generated_video_path):
+                self.step_progress.emit("步骤 4/6", "正在嵌入字幕到视频...")
+                
+                # 检查是否需要嵌入字幕
+                subtitle_mode = voice_params.get('subtitle_mode', '不嵌入字幕')
+                generate_bilingual = voice_params.get('generate_bilingual', False)
+                
+                if subtitle_mode != '不嵌入字幕':
+                    try:
+                        import addSrt
+                        
+                        # 准备字幕文件路径
+                        original_subtitle = subtitle_file
+                        final_output_path = generated_video_path
+                        
+                        # 检查是否需要双语字幕
+                        if generate_bilingual and actual_conversion_type in ["中文转英文", "英文转中文"]:
+                            self.step_progress.emit("步骤 5/6", "正在生成双语字幕...")
+                            
+                            # 创建双语字幕文件
+                            bilingual_subtitle_path = self._create_bilingual_subtitle(
+                                original_subtitle, 
+                                subtitle_content, 
+                                actual_conversion_type,
+                                file_output_dir,
+                                clean_name
+                            )
+                            
+                            if bilingual_subtitle_path:
+                                # 使用双语字幕嵌入
+                                subtitled_video_path = os.path.join(
+                                    file_output_dir, 
+                                    f"{clean_name}_{conversion_suffix}_with_bilingual_subtitles{original_ext}"
+                                )
+                                
+                                if subtitle_mode == "硬字幕（烧录到视频）":
+                                    success = addSrt.run(
+                                        generated_video_path, 
+                                        bilingual_subtitle_path, 
+                                        subtitled_video_path, 
+                                        hard_subtitle=True
+                                    )
+                                else:
+                                    success = addSrt.run(
+                                        generated_video_path, 
+                                        bilingual_subtitle_path, 
+                                        subtitled_video_path, 
+                                        hard_subtitle=False
+                                    )
+                                
+                                if success and os.path.exists(subtitled_video_path):
+                                    final_output_path = subtitled_video_path
+                                    print(f"✅ 双语字幕嵌入成功: {subtitled_video_path}")
+                                else:
+                                    print(f"❌ 双语字幕嵌入失败，使用原视频")
+                            else:
+                                print(f"❌ 双语字幕创建失败")
+                        
+                        else:
+                            # 单语字幕嵌入
+                            self.step_progress.emit("步骤 5/6", "正在嵌入单语字幕...")
+                            
+                            # 选择要嵌入的字幕（优先使用转换后字幕）
+                            subtitle_to_embed = original_subtitle
+                            if actual_conversion_type in ["中文转英文", "英文转中文"]:
+                                # 尝试找到转换后字幕
+                                possible_translated_files = [
+                                    os.path.join(file_output_dir, f"{clean_name}_translated.srt"),
+                                    os.path.join(os.path.dirname(subtitle_file), f"{os.path.splitext(os.path.basename(subtitle_file))[0]}_translated.srt")
+                                ]
+                                
+                                for translated_file in possible_translated_files:
+                                    if os.path.exists(translated_file):
+                                        subtitle_to_embed = translated_file
+                                        break
+                            
+                            subtitled_video_path = os.path.join(
+                                file_output_dir, 
+                                f"{clean_name}_{conversion_suffix}_with_subtitles{original_ext}"
+                            )
+                            
+                            if subtitle_mode == "硬字幕（烧录到视频）":
+                                success = addSrt.run(
+                                    generated_video_path, 
+                                    subtitle_to_embed, 
+                                    subtitled_video_path, 
+                                    hard_subtitle=True
+                                )
+                            else:
+                                success = addSrt.run(
+                                    generated_video_path, 
+                                    subtitle_to_embed, 
+                                    subtitled_video_path, 
+                                    hard_subtitle=False
+                                )
+                            
+                            if success and os.path.exists(subtitled_video_path):
+                                final_output_path = subtitled_video_path
+                                print(f"✅ 字幕嵌入成功: {subtitled_video_path}")
+                            else:
+                                print(f"❌ 字幕嵌入失败，使用原视频")
+                        
+                        # 更新最终输出路径
+                        generated_video_path = final_output_path
+                        
+                    except Exception as e:
+                        print(f"字幕嵌入过程中发生错误: {str(e)}")
+                        self.step_progress.emit("警告", f"字幕嵌入失败: {str(e)}")
+                
+                else:
+                    print("用户选择不嵌入字幕，跳过字幕嵌入步骤")
+            
             # 验证输出文件
             final_output = generated_video_path if generated_video_path and os.path.exists(generated_video_path) else final_video_path
             
@@ -551,6 +664,72 @@ class BatchProcessThread(QThread):
         except Exception as e:
             print(f"翻译字幕内容失败: {e}")
             return subtitle_content  # 出错时返回原内容
+
+    def _create_bilingual_subtitle(self, original_subtitle_path, original_content, conversion_type, output_dir, clean_name):
+        """创建双语字幕文件"""
+        try:
+            import re
+            
+            print(f"开始创建双语字幕，转换类型: {conversion_type}")
+            
+            # 解析原始字幕
+            subtitle_pattern = r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n(.*?)(?=\n\d+\n|\n*$)'
+            original_matches = re.findall(subtitle_pattern, original_content, re.DOTALL)
+            
+            if not original_matches:
+                print("无法解析原始字幕格式")
+                return None
+            
+            # 获取翻译后内容
+            translated_content = self._translate_subtitle_content(original_content, conversion_type)
+            translated_matches = re.findall(subtitle_pattern, translated_content, re.DOTALL)
+            
+            if len(original_matches) != len(translated_matches):
+                print(f"字幕条目数量不匹配: 原始({len(original_matches)}) vs 翻译({len(translated_matches)})")
+                # 当数量不匹配时，以较少的为准
+                min_length = min(len(original_matches), len(translated_matches))
+                original_matches = original_matches[:min_length]
+                translated_matches = translated_matches[:min_length]
+            
+            # 创建双语字幕
+            bilingual_entries = []
+            
+            for orig_match, trans_match in zip(original_matches, translated_matches):
+                orig_index, orig_start, orig_end, orig_text = orig_match
+                trans_index, trans_start, trans_end, trans_text = trans_match
+                
+                orig_text = orig_text.strip()
+                trans_text = trans_text.strip()
+                
+                # 根据转换类型决定上下顺序
+                if conversion_type == "中文转英文":
+                    # 中文在上，英文在下
+                    bilingual_text = f"{orig_text}\n{trans_text}"
+                elif conversion_type == "英文转中文":
+                    # 英文在上，中文在下  
+                    bilingual_text = f"{orig_text}\n{trans_text}"
+                else:
+                    bilingual_text = orig_text
+                    
+                # 构建双语SRT条目
+                entry = f"{orig_index}\n{orig_start} --> {orig_end}\n{bilingual_text}\n"
+                bilingual_entries.append(entry)
+            
+            # 保存双语字幕文件
+            bilingual_subtitle_path = os.path.join(output_dir, f"{clean_name}_bilingual.srt")
+            
+            with open(bilingual_subtitle_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(bilingual_entries))
+            
+            print(f"✅ 双语字幕文件已创建: {bilingual_subtitle_path}")
+            
+            return bilingual_subtitle_path
+            
+        except Exception as e:
+            print(f"创建双语字幕失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 class BatchProcessDialog(QDialog):
     """批量处理对话框"""
@@ -1056,6 +1235,33 @@ class BatchProcessDialog(QDialog):
         voice_params_layout.addWidget(quality_label, 2, 0, Qt.AlignLeft)
         voice_params_layout.addWidget(self.quality_combo, 2, 1, Qt.AlignLeft)
         
+        # 字幕嵌入选项
+        subtitle_mode_label = QLabel("字幕嵌入:")
+        subtitle_mode_label.setStyleSheet("font-weight: bold; color: #333;")
+        subtitle_mode_label.setAlignment(Qt.AlignLeft)
+        self.subtitle_mode_combo = QComboBox()
+        self.subtitle_mode_combo.addItems([
+            "不嵌入字幕", 
+            "软字幕（可选择）", 
+            "硬字幕（烧录到视频）"
+        ])
+        self.subtitle_mode_combo.setCurrentIndex(0)  # 默认不嵌入
+        self.subtitle_mode_combo.setToolTip("选择字幕嵌入方式：\n• 不嵌入字幕：生成独立的字幕文件\n• 软字幕：嵌入到视频文件中，播放时可选择显示\n• 硬字幕：直接烧录到视频画面中，无法关闭")
+        self.subtitle_mode_combo.currentTextChanged.connect(self.onConfigChanged)
+        
+        # 双语字幕选项
+        bilingual_label = QLabel("双语字幕:")
+        bilingual_label.setStyleSheet("font-weight: bold; color: #333;")
+        bilingual_label.setAlignment(Qt.AlignLeft)
+        self.bilingual_checkbox = QCheckBox("生成双语对照字幕")
+        self.bilingual_checkbox.setToolTip("仅在语言转换时生效，生成原文和译文上下对照的字幕")
+        self.bilingual_checkbox.stateChanged.connect(self.onConfigChanged)
+        
+        voice_params_layout.addWidget(subtitle_mode_label, 3, 0, Qt.AlignLeft)
+        voice_params_layout.addWidget(self.subtitle_mode_combo, 3, 1, Qt.AlignLeft)
+        voice_params_layout.addWidget(bilingual_label, 4, 0, Qt.AlignLeft)
+        voice_params_layout.addWidget(self.bilingual_checkbox, 4, 1, Qt.AlignLeft)
+        
         # 配置操作按钮
         config_buttons_layout = QHBoxLayout()
         
@@ -1389,17 +1595,20 @@ class BatchProcessDialog(QDialog):
             else:
                 # 统一配置模式
                 conversion_type = self.conversion_combo.currentText()
+                
                 # 根据转换类型选择对应的发音人
-            conversion_type = self.conversion_combo.currentText()
-            if conversion_type in ["英文转英文", "中文转英文"]:
-                voice_type = self.voice_combo_en.currentText().split(' (')[0]
-            elif conversion_type in ["中文转中文", "英文转中文"]:
-                voice_type = self.voice_combo_cn.currentText().split(' (')[0]
-            else:  # 智能转换，传递两种发音人，让ProcessThread动态选择
-                voice_type = "auto_detect"  # 特殊标记，表示需要动态选择
+                if conversion_type in ["英文转英文", "中文转英文"]:
+                    voice_type = self.voice_combo_en.currentText().split(' (')[0]
+                elif conversion_type in ["中文转中文", "英文转中文"]:
+                    voice_type = self.voice_combo_cn.currentText().split(' (')[0]
+                else:  # 智能转换，传递两种发音人，让ProcessThread动态选择
+                    voice_type = "auto_detect"  # 特殊标记，表示需要动态选择
+                
                 speed = self.speed_slider.value()
                 volume = self.volume_slider.value()
                 quality = self.quality_combo.currentText()
+                subtitle_mode = self.subtitle_mode_combo.currentText()      # 新增：字幕嵌入模式
+                generate_bilingual = self.bilingual_checkbox.isChecked()   # 新增：双语字幕选项
                 
                 voice_params = {
                     'voice_type': voice_type,
@@ -1407,7 +1616,9 @@ class BatchProcessDialog(QDialog):
                     'voice_type_en': self.voice_combo_en.currentText().split(' (')[0],
                     'speed': speed,
                     'volume': volume,
-                    'quality': quality
+                    'quality': quality,
+                    'subtitle_mode': subtitle_mode,          # 新增：字幕嵌入模式
+                    'generate_bilingual': generate_bilingual # 新增：双语字幕选项
                 }
         
                 global_config = {
@@ -1680,10 +1891,12 @@ class BatchProcessDialog(QDialog):
             'voice_type_en': self.voice_combo_en.currentText().split(' (')[0],
             'speed': self.speed_slider.value(),
             'volume': self.volume_slider.value(),
-            'quality': self.quality_combo.currentText()
+            'quality': self.quality_combo.currentText(),
+            'subtitle_mode': self.subtitle_mode_combo.currentText(),        # 新增：字幕嵌入模式
+            'generate_bilingual': self.bilingual_checkbox.isChecked()       # 新增：双语字幕选项
         }
         self.file_configs[file_path] = config
-        print(f"已保存文件配置: {os.path.basename(file_path)} -> {config['conversion_type']}")
+        print(f"已保存文件配置: {os.path.basename(file_path)} -> {config['conversion_type']}, 字幕:{config['subtitle_mode']}, 双语:{config['generate_bilingual']}")
 
     def loadConfigForFile(self, file_path):
         """加载指定文件的配置"""
@@ -1719,7 +1932,14 @@ class BatchProcessDialog(QDialog):
         self.volume_slider.setValue(config['volume'])
         self.quality_combo.setCurrentText(config['quality'])
         
-        print(f"已加载文件配置: {os.path.basename(file_path)} -> {config['conversion_type']}")
+        # 加载字幕相关配置
+        subtitle_mode = config.get('subtitle_mode', '不嵌入字幕')
+        self.subtitle_mode_combo.setCurrentText(subtitle_mode)
+        
+        generate_bilingual = config.get('generate_bilingual', False)
+        self.bilingual_checkbox.setChecked(generate_bilingual)
+        
+        print(f"已加载文件配置: {os.path.basename(file_path)} -> {config['conversion_type']}, 字幕:{subtitle_mode}, 双语:{generate_bilingual}")
 
     def getDefaultConfig(self):
         """获取默认配置（优先使用主界面保存的配置）"""
@@ -1730,7 +1950,9 @@ class BatchProcessDialog(QDialog):
             'speed': 100,
             'volume': 80,
             'quality': '高质量',
-            'concurrent_count': 1
+            'concurrent_count': 1,
+            'subtitle_mode': '不嵌入字幕',          # 新增：字幕嵌入模式
+            'generate_bilingual': False,            # 新增：是否生成双语字幕
         }
         
         # 尝试从主界面的config.json读取配置

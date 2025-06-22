@@ -514,7 +514,7 @@ class UnifiedSpeechSynthesis:
     
     def merge_audio_with_original_intervals(self, synthesized_segments, segments, 
                                           original_audio_segments, total_duration, output_file):
-        """使用原音频片段替代静音间隔合并音频 - 改进版"""
+        """智能音频合并 - 音频段已对齐，直接合并即可"""
         try:
             # 创建基于原音频的完整背景音轨
             if original_audio_segments and isinstance(original_audio_segments, AudioSegment):
@@ -541,29 +541,19 @@ class UnifiedSpeechSynthesis:
             else:
                 # 如果没有原音频，创建静音背景
                 background_audio = AudioSegment.silent(duration=int(total_duration * 1000))
-                print("⚠️ 原音频提取失败，使用静音作为背景。可能原因：")
-                print("   1. 视频文件没有音频轨道")
-                print("   2. 音频格式不支持")
-                print("   3. 视频文件损坏")
-                print("   💡 建议：检查原视频是否有音频，或尝试重新编码视频")
+                print("⚠️ 原音频提取失败，使用静音作为背景")
             
-            # 在指定位置叠加合成语音
+            # 在指定位置叠加已对齐的合成语音
             final_audio = background_audio
             
             for i, ((text, start_time, end_time), synth_segment) in enumerate(zip(segments, synthesized_segments)):
+                if synth_segment is None:
+                    continue
+                    
                 start_ms = int(start_time * 1000)
-                end_ms = int(end_time * 1000)
                 
-                # 确保合成音频长度匹配时间间隔
-                target_duration_ms = end_ms - start_ms
-                if abs(len(synth_segment) - target_duration_ms) > 100:  # 100ms的容差
-                    # 调整音频长度
-                    speed_ratio = len(synth_segment) / target_duration_ms
-                    if 0.8 < speed_ratio < 1.2:  # 只在合理范围内调整
-                        # 使用简单的速度调整
-                        synth_segment = synth_segment._spawn(synth_segment.raw_data, 
-                                                          overrides={"frame_rate": int(synth_segment.frame_rate * speed_ratio)})
-                        synth_segment = synth_segment.set_frame_rate(synth_segment.frame_rate)
+                # 音频段已经在合成时对齐，无需再次调整时长
+                print(f"📍 片段 {i+1}: {start_time:.1f}s-{end_time:.1f}s，音频时长={len(synth_segment)/1000:.2f}s")
                 
                 # 为合成音频添加渐变效果，改善衔接
                 fade_duration = min(50, len(synth_segment) // 20)  # 最多50ms渐变
@@ -571,6 +561,7 @@ class UnifiedSpeechSynthesis:
                     synth_segment = synth_segment.fade_in(fade_duration).fade_out(fade_duration)
                 
                 # 在语音段期间降低背景音量
+                end_ms = start_ms + len(synth_segment)
                 if start_ms < len(final_audio) and end_ms <= len(final_audio):
                     # 分割音频
                     before = final_audio[:start_ms]
@@ -583,23 +574,20 @@ class UnifiedSpeechSynthesis:
                 # 叠加合成语音
                 if start_ms < len(final_audio):
                     # 确保不超出边界
-                    end_position = min(start_ms + len(synth_segment), len(final_audio))
-                    if end_position > start_ms:
-                        # 可能需要裁切synth_segment
-                        if start_ms + len(synth_segment) > len(final_audio):
-                            synth_segment = synth_segment[:len(final_audio) - start_ms]
-                        
-                        final_audio = final_audio.overlay(synth_segment, position=start_ms)
+                    if start_ms + len(synth_segment) > len(final_audio):
+                        synth_segment = synth_segment[:len(final_audio) - start_ms]
+                    
+                    final_audio = final_audio.overlay(synth_segment, position=start_ms)
                 
-                print(f"✅ 片段 {i+1}: {start_time:.1f}s-{end_time:.1f}s 已叠加")
+                print(f"✅ 片段 {i+1}: 已叠加到 {start_time:.1f}s 位置")
             
             # 导出最终音频
             final_audio.export(output_file, format="wav")
-            print(f"✅ 音频合并完成: {output_file}, 总长度: {len(final_audio)/1000:.1f}秒")
+            print(f"✅ 智能音频合并完成: {output_file}, 总长度: {len(final_audio)/1000:.1f}秒")
             return final_audio
             
         except Exception as e:
-            print(f"❌ 改进音频合并失败: {e}")
+            print(f"❌ 智能音频合并失败: {e}")
             # 备用方案：使用静音间隔
             return self._merge_with_silence(synthesized_segments, segments, total_duration, output_file)
     
@@ -721,22 +709,6 @@ class UnifiedSpeechSynthesis:
             # 检查是否成功
             if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
                 return True
-                
-                # 备用方法：使用pydub的简单速度调整
-                try:
-                    # 调整播放速度（改变帧率）
-                    new_frame_rate = int(audio.frame_rate * speed_rate)
-                    speed_audio = audio._spawn(audio.raw_data, overrides={"frame_rate": new_frame_rate})
-                    speed_audio = speed_audio.set_frame_rate(16000)  # 重新设置为标准采样率
-                    speed_audio.export(output_file, format="wav")
-                    print(f"✅ 使用pydub调速成功")
-                    return True
-                except Exception as pydub_error:
-                    print(f"❌ pydub调速也失败: {pydub_error}")
-                    # 最后备用：直接复制原文件
-                    audio.export(output_file, format="wav")
-                    print(f"⚠️ 调速失败，使用原始音频")
-                    return True
             
         except Exception as e:
             print(f"❌ 调整音频速度失败: {e}")
@@ -1062,11 +1034,6 @@ class UnifiedSpeechSynthesis:
                         
                 except Exception as ffmpeg_error:
                     print(f"❌ FFmpeg合并失败: {ffmpeg_error}")
-                    # 保存音频文件到输出目录
-                    backup_audio = output_path.replace('.mp4', '_audio.wav')
-                    import shutil
-                    shutil.copy2(merged_audio_file, backup_audio)
-                    print(f"⚠️ 已保存音频文件: {backup_audio}")
                     raise Exception(f"视频音频合并失败: {ffmpeg_error}")
                 
                 # 最终验证
@@ -1143,8 +1110,8 @@ class UnifiedSpeechSynthesis:
             raise e
     
     def synthesize_batch_segments(self, text_segments, voice_type="xiaoyan", speed=50, volume=50, progress_callback=None, quality="高质量"):
-        """批量合成音频片段，使用并行处理提高速度"""
-        print(f"🚀 开始批量合成 {len(text_segments)} 个音频片段...")
+        """批量合成音频片段，在合成时就进行时长对齐"""
+        print(f"🚀 开始批量合成 {len(text_segments)} 个音频片段（含时长对齐）...")
         
         # 创建结果队列，保持顺序
         results = [None] * len(text_segments)
@@ -1156,21 +1123,39 @@ class UnifiedSpeechSynthesis:
                 continue
                 
             try:
-                temp_output = f"temp_segment_{i}_{int(time.time() * 1000)}.wav"
+                # 计算目标时长
+                target_duration = end_time - start_time
                 
-                # 调用原有的合成方法
+                temp_output = f"temp_segment_{i}_{int(time.time() * 1000)}.wav"
+                temp_aligned = f"temp_aligned_{i}_{int(time.time() * 1000)}.wav"
+                
+                # 第一步：调用原有的合成方法
                 success = self.synthesize_text(text, temp_output, voice_type, speed, volume, quality)
                 
                 if success and os.path.exists(temp_output):
-                    # 读取音频数据到内存
-                    audio_segment = AudioSegment.from_wav(temp_output)
-                    results[i] = audio_segment
+                    # 第二步：立即进行时长对齐
+                    align_success = self.adjust_audio_speed(temp_output, target_duration, temp_aligned)
                     
-                    # 立即清理临时文件
-                    try:
-                        os.remove(temp_output)
-                    except:
-                        pass
+                    if align_success and os.path.exists(temp_aligned):
+                        # 读取对齐后的音频数据到内存
+                        audio_segment = AudioSegment.from_wav(temp_aligned)
+                        results[i] = audio_segment
+                        print(f"✅ 片段 {i+1}: 合成+对齐成功，目标时长={target_duration:.2f}s，实际时长={len(audio_segment)/1000:.2f}s")
+                        
+                        # 清理临时文件
+                        try:
+                            os.remove(temp_output)
+                            os.remove(temp_aligned)
+                        except:
+                            pass
+                    else:
+                        print(f"⚠️ 片段 {i+1}: 时长对齐失败，使用原始合成音频")
+                        audio_segment = AudioSegment.from_wav(temp_output)
+                        results[i] = audio_segment
+                        try:
+                            os.remove(temp_output)
+                        except:
+                            pass
                 else:
                     failed_indices.append(i)
                     
@@ -1181,7 +1166,7 @@ class UnifiedSpeechSynthesis:
             # 更新进度
             if progress_callback:
                 progress = int(((i + 1) / len(text_segments)) * 30)  # 合成占30%进度
-                progress_callback(progress, f"已完成音频合成 {i + 1}/{len(text_segments)}")
+                progress_callback(progress, f"已完成音频合成+对齐 {i + 1}/{len(text_segments)}")
         
         # 重试失败的片段（串行）
         if failed_indices:
@@ -1189,7 +1174,10 @@ class UnifiedSpeechSynthesis:
             for index in failed_indices:
                 if index < len(text_segments):
                     text, start_time, end_time = text_segments[index]
+                    target_duration = end_time - start_time
+                    
                     temp_output = f"temp_retry_{index}_{int(time.time() * 1000)}.wav"
+                    temp_aligned = f"temp_retry_aligned_{index}_{int(time.time() * 1000)}.wav"
                     
                     print(f"🔄 重试片段 {index}: {text[:50]}... (使用发音人: {voice_type})")
                     
@@ -1199,7 +1187,15 @@ class UnifiedSpeechSynthesis:
                         for attempt in range(3):  # 最多3次重试
                             success = self.synthesize_text(text, temp_output, voice_type, speed, volume, quality)
                             if success and os.path.exists(temp_output) and os.path.getsize(temp_output) > 0:
-                                results[index] = AudioSegment.from_wav(temp_output)
+                                # 尝试时长对齐
+                                align_success = self.adjust_audio_speed(temp_output, target_duration, temp_aligned)
+                                
+                                if align_success and os.path.exists(temp_aligned):
+                                    results[index] = AudioSegment.from_wav(temp_aligned)
+                                    os.remove(temp_aligned)
+                                else:
+                                    results[index] = AudioSegment.from_wav(temp_output)
+                                
                                 os.remove(temp_output)
                                 print(f"✅ 片段 {index} 重试成功 (第{attempt+1}次)")
                                 break
@@ -1210,13 +1206,13 @@ class UnifiedSpeechSynthesis:
                         
                         if not success:
                             print(f"❌ 片段 {index} 所有重试都失败，使用静音")
-                            results[index] = AudioSegment.silent(duration=int((end_time - start_time) * 1000))
+                            results[index] = AudioSegment.silent(duration=int(target_duration * 1000))
                             
                     except Exception as e:
                         print(f"❌ 片段 {index} 重试异常: {e}")
-                        results[index] = AudioSegment.silent(duration=int((end_time - start_time) * 1000))
+                        results[index] = AudioSegment.silent(duration=int(target_duration * 1000))
         
-        print(f"✅ 批量合成完成，成功率: {(len(text_segments) - len(failed_indices))/len(text_segments)*100:.1f}%")
+        print(f"✅ 批量合成+对齐完成，成功率: {(len(text_segments) - len(failed_indices))/len(text_segments)*100:.1f}%")
         return results
     
     def _init_cache_dir(self):

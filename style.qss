@@ -106,22 +106,40 @@ QGroupBox#conversionSection {
 
 /* --- 文件拖拽区域 --- */
 #dropAreaLabel {
-    border: 3px dashed #0078D7;
-    border-radius: 1.0em;
-    padding: 2.5em;
-    font-size: 1.1em;
+    border: 4px dashed #0078D7 !important;  /* 增加边框宽度并提高优先级 */
+    border-radius: 1.2em;
+    padding: 3.0em;  /* 增加内边距 */
+    font-size: 1.2em;  /* 稍大字体 */
     color: #0078D7;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(0, 120, 215, 0.05), 
-        stop:1 rgba(0, 120, 215, 0.1));
-    font-weight: 500;
+        stop:0 rgba(0, 120, 215, 0.08), 
+        stop:1 rgba(0, 120, 215, 0.15));
+    font-weight: 600;  /* 更粗字体 */
+    /* 添加阴影效果增强视觉效果 */
+    border-style: dashed !important;
+    /* 使用动画过渡 */
+    transition: all 0.3s ease;
 }
+
 #dropAreaLabel:hover {
-    border-color: #005a9e;
+    border-color: #005a9e !important;
+    border-width: 5px !important;  /* 悬停时进一步加粗边框 */
     color: #005a9e;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(0, 120, 215, 0.1), 
-        stop:1 rgba(0, 120, 215, 0.2));
+        stop:0 rgba(0, 120, 215, 0.15), 
+        stop:1 rgba(0, 120, 215, 0.25));
+    /* 添加轻微的缩放效果 */
+    transform: scale(1.02);
+}
+
+/* 为拖拽状态添加特殊样式 */
+#dropAreaLabel[drag-state="active"] {
+    border-color: #28a745 !important;
+    border-width: 5px !important;
+    color: #28a745;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 rgba(40, 167, 69, 0.1), 
+        stop:1 rgba(40, 167, 69, 0.2));
 }
 
 /* --- 路径与状态标签 --- */
