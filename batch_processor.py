@@ -753,8 +753,8 @@ class BatchProcessDialog(QDialog):
         
         layout = QVBoxLayout(self)
         # 【修复】减小间距和边距，节省垂直空间
-        layout.setSpacing(12)  # 减小间距
-        layout.setContentsMargins(15, 15, 15, 15)  # 减小边距
+        # layout.setSpacing(12)  # 减小间距
+        # layout.setContentsMargins(15, 15, 15, 15)  # 减小边距
         
         # 顶部标题
         title_label = QLabel("批量视频语音转换处理")
@@ -1597,12 +1597,12 @@ class BatchProcessDialog(QDialog):
                 conversion_type = self.conversion_combo.currentText()
                 
                 # 根据转换类型选择对应的发音人
-                if conversion_type in ["英文转英文", "中文转英文"]:
-                    voice_type = self.voice_combo_en.currentText().split(' (')[0]
-                elif conversion_type in ["中文转中文", "英文转中文"]:
-                    voice_type = self.voice_combo_cn.currentText().split(' (')[0]
-                else:  # 智能转换，传递两种发音人，让ProcessThread动态选择
-                    voice_type = "auto_detect"  # 特殊标记，表示需要动态选择
+            if conversion_type in ["英文转英文", "中文转英文"]:
+                voice_type = self.voice_combo_en.currentText().split(' (')[0]
+            elif conversion_type in ["中文转中文", "英文转中文"]:
+                voice_type = self.voice_combo_cn.currentText().split(' (')[0]
+            else:  # 智能转换，传递两种发音人，让ProcessThread动态选择
+                voice_type = "auto_detect"  # 特殊标记，表示需要动态选择
                 
                 speed = self.speed_slider.value()
                 volume = self.volume_slider.value()

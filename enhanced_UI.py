@@ -3543,7 +3543,10 @@ class EnhancedMainWindow(QMainWindow):
             self.load_stylesheet("style.qss")
     
     def calculateEstimatedTime(self):
-        """计算预估处理时间（基于实际处理复杂度的现实版本）"""
+        """计算预估处理时间（优化并行处理后的乐观版本）
+        
+        整体公式：总时间 = (文件系数 × 基础时间 + 处理步骤时间) × 并行优化系数 × 质量系数
+        """
         try:
             if not self.video_path:
                 return "无法估算"
@@ -3551,61 +3554,70 @@ class EnhancedMainWindow(QMainWindow):
             # 获取文件大小和基础信息
             file_size_mb = os.path.getsize(self.video_path) / (1024 * 1024)
             
-            # 基于实际处理步骤的时间估算
+            # 基础参数
             conversion_type = self.conversion_combo.currentText()
             quality = self.quality_combo.currentText()
             speed = self.speed_slider.value()
             
-            # 1. 视频解码和音频提取时间：每100MB约30秒
-            decode_time = max(0.5, file_size_mb / 100 * 0.5)
+            # 🎯 核心公式参数
+            # 基础时间系数 (分钟/MB) - 经过优化后更乐观
+            base_time_per_mb = 0.15  # 原来每MB约0.25分钟，现在优化到0.15分钟
             
-            # 2. 语音识别时间：每MB约6秒（这是最耗时的步骤）
-            recognition_time = file_size_mb * 0.1  # 每MB约6秒，但按保守估算
+            # 文件大小系数 - 对小文件更友好
+            if file_size_mb <= 50:
+                size_factor = 0.6  # 小文件 50MB以下
+            elif file_size_mb <= 150:
+                size_factor = 0.8  # 中等文件 50-150MB
+            elif file_size_mb <= 300:
+                size_factor = 1.0  # 标准文件 150-300MB
+            else:
+                size_factor = 1.2  # 大文件 300MB以上
             
-            # 3. 文本翻译时间（如果需要）
-            translation_time = 0
-            if "翻译" in conversion_type or conversion_type == "智能转换":
-                translation_time = max(0.3, file_size_mb * 0.02)  # 每MB约1.2秒
+            # 🚀 并行优化系数 - 考虑新的并行处理能力
+            parallel_factor = 0.6  # 语音合成片段并行 + 批处理文件并行，理论加速60%
             
-            # 4. 语音合成时间：根据文本量和质量
-            synthesis_base = file_size_mb * 0.05  # 基础合成时间
+            # 📋 处理步骤时间（分钟）
+            steps_time = {
+                "解码提取": 0.3,          # 视频解码和音频提取，固定时间
+                "语音识别": file_size_mb * 0.05,  # 主要耗时，但API优化后更快
+                "文本翻译": 0.2 if "翻译" in conversion_type or conversion_type == "智能转换" else 0,
+                "语音合成": file_size_mb * 0.03,  # 并行处理后大幅优化
+                "视频编码": file_size_mb * 0.02,  # 编码优化
+                "系统开销": 0.5           # 固定系统开销
+            }
+            
+            # 质量系数
             quality_multiplier = {
-                "标准质量": 0.8,
+                "标准质量": 0.75,  # 更乐观的质量影响
                 "高质量": 1.0, 
-                "超清质量": 1.3
+                "超清质量": 1.15   # 降低质量影响
             }.get(quality, 1.0)
-            synthesis_time = synthesis_base * quality_multiplier
             
-            # 5. 视频编码和字幕嵌入时间：每100MB约1分钟
-            encoding_time = max(0.3, file_size_mb / 100 * 1.0)
+            # 🧮 应用整体公式
+            # 基础时间
+            base_time = file_size_mb * base_time_per_mb * size_factor
             
-            # 6. 双语字幕额外时间（如果需要）
-            bilingual_time = 0
-            if conversion_type in ["中文转英文", "英文转中文"]:
-                bilingual_time = max(0.2, file_size_mb * 0.01)  # 额外的双语处理时间
+            # 步骤总时间
+            total_steps_time = sum(steps_time.values())
             
-            # 7. 系统开销和缓冲时间
-            overhead_time = max(0.5, (decode_time + recognition_time + synthesis_time + encoding_time) * 0.2)
+            # 应用并行优化和质量系数
+            total_minutes = (base_time + total_steps_time) * parallel_factor * quality_multiplier
             
-            # 总时间计算
-            total_minutes = decode_time + recognition_time + translation_time + synthesis_time + encoding_time + bilingual_time + overhead_time
-            
-            # 根据文件大小调整
-            if file_size_mb < 50:  # 小文件
-                total_minutes *= 0.8
-            elif file_size_mb > 300:  # 大文件
-                total_minutes *= 1.2
-            
-            # 语速影响合成时间
+            # 🎛️ 微调因子
+            # 语速影响（简化）
             if speed > 120:
-                total_minutes *= 1.1
+                total_minutes *= 1.05  # 高速略增加时间
             elif speed < 80:
-                total_minutes *= 0.95
+                total_minutes *= 0.95  # 低速略减少时间
             
-            # 合理范围控制：最少1分钟，最多45分钟
-            total_minutes = max(1.0, min(45, total_minutes))
+            # 转换类型影响
+            if conversion_type == "智能转换":
+                total_minutes *= 1.1  # 智能转换稍微增加时间
             
-            # 格式化显示
+            # 📊 合理范围控制 - 更乐观的上下限
+            total_minutes = max(0.5, min(30, total_minutes))  # 最少30秒，最多30分钟
+            
+            # 🎯 格式化显示
             total_seconds = int(total_minutes * 60)
             if total_seconds < 60:
                 return f"{total_seconds}秒"
@@ -3623,7 +3635,7 @@ class EnhancedMainWindow(QMainWindow):
                 
         except Exception as e:
             print(f"计算预估时间失败: {e}")
-            return "5-15分钟"  # 更现实的默认估计
+            return "2-8分钟"  # 更乐观的默认估计
     
     def parseTimeToSeconds(self, time_str):
         """将时间字符串转换为秒数"""

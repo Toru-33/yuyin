@@ -36,7 +36,7 @@ def videoToWav(videoPath, savePath, output_filename=None):
                 raise Exception("无法从视频中提取音频对象")
             
             try:
-                # 写入音频文件，移除不支持的temp_audiofile参数
+                # 写入音频文件
                 audio.write_audiofile(
                     output_path, 
                     verbose=False, 

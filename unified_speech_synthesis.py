@@ -574,10 +574,10 @@ class UnifiedSpeechSynthesis:
                 # 叠加合成语音
                 if start_ms < len(final_audio):
                     # 确保不超出边界
-                    if start_ms + len(synth_segment) > len(final_audio):
-                        synth_segment = synth_segment[:len(final_audio) - start_ms]
-                    
-                    final_audio = final_audio.overlay(synth_segment, position=start_ms)
+                        if start_ms + len(synth_segment) > len(final_audio):
+                            synth_segment = synth_segment[:len(final_audio) - start_ms]
+                        
+                        final_audio = final_audio.overlay(synth_segment, position=start_ms)
                 
                 print(f"✅ 片段 {i+1}: 已叠加到 {start_time:.1f}s 位置")
             
@@ -670,11 +670,13 @@ class UnifiedSpeechSynthesis:
                 
                 # 使用audiotsm进行高质量变速
                 try:
+                    import audiotsm.io.wav
+                    
                     reader = audiotsm.io.wav.WavReader(temp_wav_for_speed)
-                    writer = audiotsm.io.wav.WavWriter(output_file, 1, 16000)
+                    writer = audiotsm.io.wav.WavWriter(output_file, reader.channels, reader.samplerate)
                     
                     # 使用WSOLA算法保持音质
-                    wsola = audiotsm.wsola(1, speed=speed_rate)
+                    wsola = audiotsm.wsola(reader.channels, speed=speed_rate)
                     wsola.run(reader, writer)
                     
                     # 确保读写器正确关闭
@@ -1110,24 +1112,37 @@ class UnifiedSpeechSynthesis:
             raise e
     
     def synthesize_batch_segments(self, text_segments, voice_type="xiaoyan", speed=50, volume=50, progress_callback=None, quality="高质量"):
-        """批量合成音频片段，在合成时就进行时长对齐"""
+        """批量合成音频片段，在合成时就进行时长对齐 - 支持并行处理"""
         print(f"🚀 开始批量合成 {len(text_segments)} 个音频片段（含时长对齐）...")
+        
+        # 根据片段数量自动决定并行数量
+        num_segments = len(text_segments)
+        if num_segments <= 1:
+            max_workers = 1
+        elif num_segments <= 5:
+            max_workers = 2
+        elif num_segments <= 10:
+            max_workers = 3
+        else:
+            max_workers = min(4, num_segments // 3)  # 最多4个线程，避免API限制
+        
+        print(f"🔧 使用 {max_workers} 个线程并行处理语音合成")
         
         # 创建结果队列，保持顺序
         results = [None] * len(text_segments)
-        failed_indices = []
         
-        # 串行处理所有文本片段
-        for i, (text, start_time, end_time) in enumerate(text_segments):
+        # 定义单个片段处理函数
+        def process_segment(i, text, start_time, end_time):
+            """处理单个音频片段"""
             if not text.strip():
-                continue
+                return i, None, "空文本"
                 
             try:
                 # 计算目标时长
                 target_duration = end_time - start_time
                 
-                temp_output = f"temp_segment_{i}_{int(time.time() * 1000)}.wav"
-                temp_aligned = f"temp_aligned_{i}_{int(time.time() * 1000)}.wav"
+                temp_output = f"temp_segment_{i}_{int(time.time() * 1000)}_{threading.current_thread().ident}.wav"
+                temp_aligned = f"temp_aligned_{i}_{int(time.time() * 1000)}_{threading.current_thread().ident}.wav"
                 
                 # 第一步：调用原有的合成方法
                 success = self.synthesize_text(text, temp_output, voice_type, speed, volume, quality)
@@ -1139,7 +1154,6 @@ class UnifiedSpeechSynthesis:
                     if align_success and os.path.exists(temp_aligned):
                         # 读取对齐后的音频数据到内存
                         audio_segment = AudioSegment.from_wav(temp_aligned)
-                        results[i] = audio_segment
                         print(f"✅ 片段 {i+1}: 合成+对齐成功，目标时长={target_duration:.2f}s，实际时长={len(audio_segment)/1000:.2f}s")
                         
                         # 清理临时文件
@@ -1148,56 +1162,86 @@ class UnifiedSpeechSynthesis:
                             os.remove(temp_aligned)
                         except:
                             pass
+                        
+                        return i, audio_segment, "成功"
                     else:
                         print(f"⚠️ 片段 {i+1}: 时长对齐失败，使用原始合成音频")
                         audio_segment = AudioSegment.from_wav(temp_output)
-                        results[i] = audio_segment
                         try:
                             os.remove(temp_output)
                         except:
                             pass
+                        return i, audio_segment, "对齐失败"
                 else:
-                    failed_indices.append(i)
+                    return i, None, "合成失败"
                     
             except Exception as e:
                 print(f"❌ 片段 {i} 合成失败: {e}")
-                failed_indices.append(i)
-            
-            # 更新进度
-            if progress_callback:
-                progress = int(((i + 1) / len(text_segments)) * 30)  # 合成占30%进度
-                progress_callback(progress, f"已完成音频合成+对齐 {i + 1}/{len(text_segments)}")
+                return i, None, str(e)
         
-        # 重试失败的片段（串行）
-        if failed_indices:
-            print(f"⚠️ 重试 {len(failed_indices)} 个失败的片段...")
-            for index in failed_indices:
-                if index < len(text_segments):
-                    text, start_time, end_time = text_segments[index]
-                    target_duration = end_time - start_time
-                    
-                    temp_output = f"temp_retry_{index}_{int(time.time() * 1000)}.wav"
-                    temp_aligned = f"temp_retry_aligned_{index}_{int(time.time() * 1000)}.wav"
-                    
-                    print(f"🔄 重试片段 {index}: {text[:50]}... (使用发音人: {voice_type})")
-                    
+        # 使用线程池并行处理
+        if max_workers == 1:
+            # 单线程处理（串行）
+            for i, (text, start_time, end_time) in enumerate(text_segments):
+                index, audio_segment, status = process_segment(i, text, start_time, end_time)
+                results[index] = audio_segment
+                
+                # 更新进度
+                if progress_callback:
+                    progress = int(((i + 1) / len(text_segments)) * 30)  # 合成占30%进度
+                    progress_callback(progress, f"已完成音频合成+对齐 {i + 1}/{len(text_segments)}")
+        else:
+            # 多线程并行处理
+            completed_count = 0
+            failed_indices = []
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # 提交所有任务
+                future_to_index = {
+                    executor.submit(process_segment, i, text, start_time, end_time): i
+                    for i, (text, start_time, end_time) in enumerate(text_segments)
+                }
+                
+                # 收集结果
+                for future in concurrent.futures.as_completed(future_to_index):
                     try:
+                        index, audio_segment, status = future.result()
+                        results[index] = audio_segment
+                        
+                        if audio_segment is None:
+                            failed_indices.append(index)
+                        
+                        completed_count += 1
+                        
+                        # 更新进度
+                        if progress_callback:
+                            progress = int((completed_count / len(text_segments)) * 30)  # 合成占30%进度
+                            progress_callback(progress, f"已完成音频合成+对齐 {completed_count}/{len(text_segments)}")
+                            
+                    except Exception as e:
+                        index = future_to_index[future]
+                        print(f"❌ 片段 {index} 处理异常: {e}")
+                        failed_indices.append(index)
+                        completed_count += 1
+            
+            # 重试失败的片段（串行）
+            if failed_indices:
+                print(f"⚠️ 重试 {len(failed_indices)} 个失败的片段...")
+                for index in failed_indices:
+                    if index < len(text_segments):
+                        text, start_time, end_time = text_segments[index]
+                        target_duration = end_time - start_time
+                        
+                        print(f"🔄 重试片段 {index}: {text[:50]}... (使用发音人: {voice_type})")
+                        
                         # 增加重试次数和等待时间
                         success = False
                         for attempt in range(3):  # 最多3次重试
-                            success = self.synthesize_text(text, temp_output, voice_type, speed, volume, quality)
-                            if success and os.path.exists(temp_output) and os.path.getsize(temp_output) > 0:
-                                # 尝试时长对齐
-                                align_success = self.adjust_audio_speed(temp_output, target_duration, temp_aligned)
-                                
-                                if align_success and os.path.exists(temp_aligned):
-                                    results[index] = AudioSegment.from_wav(temp_aligned)
-                                    os.remove(temp_aligned)
-                                else:
-                                    results[index] = AudioSegment.from_wav(temp_output)
-                                
-                                os.remove(temp_output)
+                            retry_index, retry_audio, retry_status = process_segment(index, text, start_time, end_time)
+                            if retry_audio is not None:
+                                results[index] = retry_audio
                                 print(f"✅ 片段 {index} 重试成功 (第{attempt+1}次)")
+                                success = True
                                 break
                             else:
                                 print(f"⚠️ 片段 {index} 第{attempt+1}次重试失败")
@@ -1207,12 +1251,12 @@ class UnifiedSpeechSynthesis:
                         if not success:
                             print(f"❌ 片段 {index} 所有重试都失败，使用静音")
                             results[index] = AudioSegment.silent(duration=int(target_duration * 1000))
-                            
-                    except Exception as e:
-                        print(f"❌ 片段 {index} 重试异常: {e}")
-                        results[index] = AudioSegment.silent(duration=int(target_duration * 1000))
         
-        print(f"✅ 批量合成+对齐完成，成功率: {(len(text_segments) - len(failed_indices))/len(text_segments)*100:.1f}%")
+        # 计算成功率
+        successful_count = sum(1 for result in results if result is not None)
+        success_rate = (successful_count / len(text_segments)) * 100 if text_segments else 0
+        
+        print(f"✅ 批量合成+对齐完成，成功率: {success_rate:.1f}%，并行度: {max_workers}")
         return results
     
     def _init_cache_dir(self):
