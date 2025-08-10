@@ -509,14 +509,16 @@ class BatchProcessThread(QThread):
                                         generated_video_path, 
                                         bilingual_subtitle_path, 
                                         subtitled_video_path, 
-                                        hard_subtitle=True
+                                        hard_subtitle=True,
+                                        style_options=voice_params.get('subtitle_style')
                                     )
                                 else:
                                     success = addSrt.run(
                                         generated_video_path, 
                                         bilingual_subtitle_path, 
                                         subtitled_video_path, 
-                                        hard_subtitle=False
+                                        hard_subtitle=False,
+                                        style_options=voice_params.get('subtitle_style')
                                     )
                                 
                                 if success and os.path.exists(subtitled_video_path):
@@ -555,14 +557,16 @@ class BatchProcessThread(QThread):
                                     generated_video_path, 
                                     subtitle_to_embed, 
                                     subtitled_video_path, 
-                                    hard_subtitle=True
+                                    hard_subtitle=True,
+                                    style_options=voice_params.get('subtitle_style')
                                 )
                             else:
                                 success = addSrt.run(
                                     generated_video_path, 
                                     subtitle_to_embed, 
                                     subtitled_video_path, 
-                                    hard_subtitle=False
+                                    hard_subtitle=False,
+                                    style_options=voice_params.get('subtitle_style')
                                 )
                             
                             if success and os.path.exists(subtitled_video_path):
@@ -756,21 +760,7 @@ class BatchProcessDialog(QDialog):
         # layout.setSpacing(12)  # 减小间距
         # layout.setContentsMargins(15, 15, 15, 15)  # 减小边距
         
-        # 顶部标题
-        title_label = QLabel("批量视频语音转换处理")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                font-weight: bold;
-                color: #0078D7;
-                padding: 12px;
-                background-color: #f0f8ff;
-                border-radius: 6px;
-                border: 1px solid #e0e0e0;
-            }
-        """)
-        layout.addWidget(title_label)
+        # 移除顶部标题栏（根据需求精简界面高度）
         
         # 【优化】使用 QSplitter 替换固定的水平布局，实现灵活的左右分割
         main_content_splitter = QSplitter(Qt.Horizontal)
@@ -789,7 +779,8 @@ class BatchProcessDialog(QDialog):
         left_panel_widget = QWidget()
         left_panel = QVBoxLayout(left_panel_widget)
         
-        # 文件列表区域
+        # 文件列表区域（顶部占比异常的根因：header占满空间的占位卡片）
+        # 修复：移除额外占位卡片，确保第一块就是“文件列表”分组
         file_section = QGroupBox("文件列表")
         # 【优化】移除固定宽度和最大高度限制，让其更灵活地适应窗口大小
         file_section.setMinimumWidth(400)
@@ -798,12 +789,12 @@ class BatchProcessDialog(QDialog):
         file_layout.setSpacing(6)  # 进一步减小组件间距
         file_layout.setContentsMargins(8, 8, 8, 8)  # 减小边距
         
-        # 文件操作按钮
+        # 文件操作按钮（进一步收紧高度）
         file_buttons_container = QWidget()
-        file_buttons_container.setMinimumHeight(60)  # 减小按钮区域高度
+        file_buttons_container.setMinimumHeight(36)
         file_buttons_layout = QHBoxLayout(file_buttons_container)
-        file_buttons_layout.setSpacing(8)  # 减小按钮间距
-        file_buttons_layout.setContentsMargins(5, 5, 5, 5)  # 减小边距
+        file_buttons_layout.setSpacing(6)
+        file_buttons_layout.setContentsMargins(4, 4, 4, 4)
         
         self.add_files_btn = QPushButton("添加文件")
         self.add_files_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
@@ -851,7 +842,7 @@ class BatchProcessDialog(QDialog):
         self.file_list_widget = QListWidget()
         self.file_list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         # 【优化】减小最小高度，移除最大高度限制，让列表更灵活
-        self.file_list_widget.setMinimumHeight(60)
+        self.file_list_widget.setMinimumHeight(100)
         # 不设置最大高度，让其根据内容和可用空间调整
         self.file_list_widget.itemSelectionChanged.connect(self.onFileSelectionChanged)
         
@@ -942,59 +933,19 @@ class BatchProcessDialog(QDialog):
         
         self.start_btn = QPushButton("开始批量处理")
         self.start_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        # 【优化】减小按钮尺寸，让其更灵活
-        self.start_btn.setMinimumHeight(36)
-        self.start_btn.setMinimumWidth(120)
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                font-size: 13px;
-                font-weight: bold;
-                border: 2px solid #333;
-                border-radius: 8px;
-                background-color: white;
-                color: black;
-                padding: 10px 15px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #f8f9fa;
-                border-color: #555;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-                border-color: #6c757d;
-                color: white;
-            }
-        """)
+        # 使用统一QSS，不用内联样式，并控制尺寸
+        self.start_btn.setObjectName("primaryButton")
+        self.start_btn.setMinimumHeight(32)
+        self.start_btn.setMinimumWidth(110)
         self.start_btn.clicked.connect(self.startBatchProcessing)
         
         self.stop_btn = QPushButton("停止处理")
         self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
-        # 【优化】减小按钮尺寸
-        self.stop_btn.setMinimumHeight(36)
-        self.stop_btn.setMinimumWidth(100)
+        # 使用统一QSS，不用内联样式，并控制尺寸
+        self.stop_btn.setObjectName("dangerButton")
+        self.stop_btn.setMinimumHeight(32)
+        self.stop_btn.setMinimumWidth(96)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet("""
-            QPushButton {
-                font-size: 13px;
-                font-weight: bold;
-                border: 2px solid #dc3545;
-                border-radius: 8px;
-                background-color: #dc3545;
-                color: black;
-                padding: 10px 15px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-                border-color: #c82333;
-                color: black;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-                border-color: #6c757d;
-            }
-        """)
         self.stop_btn.clicked.connect(self.stopBatchProcessing)
         
         control_layout.addWidget(self.start_btn)
@@ -1044,9 +995,10 @@ class BatchProcessDialog(QDialog):
         log_layout.setSpacing(5)
         
         self.log_text = QTextEdit()
-        # 【优化】减小日志区域的高度限制，让其更灵活
-        self.log_text.setMaximumHeight(100)
-        self.log_text.setMinimumHeight(60)
+        # 【优化】移除固定高度限制，交由布局与分割器控制
+        sizePolicy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.log_text.setSizePolicy(sizePolicy)
+        self.log_text.setMinimumHeight(80)
         self.log_text.setReadOnly(True)
         self.log_text.setStyleSheet("""
             QTextEdit {
@@ -1075,7 +1027,7 @@ class BatchProcessDialog(QDialog):
         
         left_panel.addWidget(log_group)
         
-        # 右侧区域：配置面板
+        # 右侧区域：配置面板（加入预览按钮）
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         
@@ -1083,6 +1035,8 @@ class BatchProcessDialog(QDialog):
         config_mode_group = QGroupBox("配置模式")
         config_mode_layout = QVBoxLayout(config_mode_group)
         config_mode_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)  # 左对齐
+        # 对齐右侧整体内容：与下方 config_container 左边缘对齐
+        right_layout.setContentsMargins(6, 6, 6, 6)
         
         self.global_config_radio = QRadioButton("统一配置（所有文件使用相同设置）")
         self.global_config_radio.setStyleSheet("QRadioButton { text-align: left; }")  # 文字左对齐
@@ -1100,6 +1054,8 @@ class BatchProcessDialog(QDialog):
         # 配置面板容器
         self.config_container = QWidget()
         config_container_layout = QVBoxLayout(self.config_container)
+        # 确保右侧容器整体左上对齐
+        config_container_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         
         # 文件选择提示（仅在单独配置模式下显示）
         self.file_selection_label = QLabel("请在左侧选择一个文件以配置其参数")
@@ -1234,21 +1190,17 @@ class BatchProcessDialog(QDialog):
         voice_params_layout.addWidget(self.volume_slider, 1, 1, Qt.AlignLeft)
         voice_params_layout.addWidget(quality_label, 2, 0, Qt.AlignLeft)
         voice_params_layout.addWidget(self.quality_combo, 2, 1, Qt.AlignLeft)
-        
-        # 字幕嵌入选项
+
+                # 字幕嵌入选项与样式
         subtitle_mode_label = QLabel("字幕嵌入:")
         subtitle_mode_label.setStyleSheet("font-weight: bold; color: #333;")
         subtitle_mode_label.setAlignment(Qt.AlignLeft)
         self.subtitle_mode_combo = QComboBox()
-        self.subtitle_mode_combo.addItems([
-            "不嵌入字幕", 
-            "软字幕（可选择）", 
-            "硬字幕（烧录到视频）"
-        ])
+        self.subtitle_mode_combo.addItems(["不嵌入字幕", "软字幕（可选择）", "硬字幕（烧录到视频）"]) 
         self.subtitle_mode_combo.setCurrentIndex(0)  # 默认不嵌入
         self.subtitle_mode_combo.setToolTip("选择字幕嵌入方式：\n• 不嵌入字幕：生成独立的字幕文件\n• 软字幕：嵌入到视频文件中，播放时可选择显示\n• 硬字幕：直接烧录到视频画面中，无法关闭")
         self.subtitle_mode_combo.currentTextChanged.connect(self.onConfigChanged)
-        
+
         # 双语字幕选项
         bilingual_label = QLabel("双语字幕:")
         bilingual_label.setStyleSheet("font-weight: bold; color: #333;")
@@ -1256,11 +1208,62 @@ class BatchProcessDialog(QDialog):
         self.bilingual_checkbox = QCheckBox("生成双语对照字幕")
         self.bilingual_checkbox.setToolTip("仅在语言转换时生效，生成原文和译文上下对照的字幕")
         self.bilingual_checkbox.stateChanged.connect(self.onConfigChanged)
+
+        # 样式设置（仅硬字幕生效）
+        self.subtitle_style_container = QWidget()
+        style_layout = QGridLayout(self.subtitle_style_container)
+        style_layout.setContentsMargins(0,0,0,0)
+        style_layout.setSpacing(6)
+
+        self.subtitle_font_combo = QFontComboBox()
+        self.subtitle_font_size = QSpinBox(); self.subtitle_font_size.setRange(8,96); self.subtitle_font_size.setValue(20)
+        self.subtitle_font_color_btn = QPushButton("字体颜色")
+        self.subtitle_outline_color_btn = QPushButton("描边颜色")
+        self.subtitle_outline_width = QSpinBox(); self.subtitle_outline_width.setRange(0,10); self.subtitle_outline_width.setValue(1)
+        self.subtitle_position_combo = QComboBox(); self.subtitle_position_combo.addItems(["底部居中","顶部居中","中部居中","左下","右下","左上","右上","左中","右中"]) 
+
+        def pick_color(btn):
+            color = QColorDialog.getColor(Qt.white, self, "选择颜色")
+            if color.isValid():
+                btn.setStyleSheet(f"background-color: {color.name()};")
+                btn.setProperty('pickedColor', color.name())
+
+        self.subtitle_font_color_btn.clicked.connect(lambda: pick_color(self.subtitle_font_color_btn))
+        self.subtitle_outline_color_btn.clicked.connect(lambda: pick_color(self.subtitle_outline_color_btn))
+
+        r = 0
+        style_layout.addWidget(QLabel("字体:"), r, 0, Qt.AlignLeft); style_layout.addWidget(self.subtitle_font_combo, r, 1, Qt.AlignLeft)
+        r += 1
+        style_layout.addWidget(QLabel("字号:"), r, 0, Qt.AlignLeft); style_layout.addWidget(self.subtitle_font_size, r, 1, Qt.AlignLeft)
+        r += 1
+        style_layout.addWidget(QLabel("颜色:"), r, 0, Qt.AlignLeft); style_layout.addWidget(self.subtitle_font_color_btn, r, 1, Qt.AlignLeft)
+        r += 1
+        style_layout.addWidget(QLabel("描边颜色:"), r, 0, Qt.AlignLeft); style_layout.addWidget(self.subtitle_outline_color_btn, r, 1, Qt.AlignLeft)
+        r += 1
+        style_layout.addWidget(QLabel("描边宽度:"), r, 0, Qt.AlignLeft); style_layout.addWidget(self.subtitle_outline_width, r, 1, Qt.AlignLeft)
+        r += 1
+        style_layout.addWidget(QLabel("位置:"), r, 0, Qt.AlignLeft); style_layout.addWidget(self.subtitle_position_combo, r, 1, Qt.AlignLeft)
         
         voice_params_layout.addWidget(subtitle_mode_label, 3, 0, Qt.AlignLeft)
         voice_params_layout.addWidget(self.subtitle_mode_combo, 3, 1, Qt.AlignLeft)
         voice_params_layout.addWidget(bilingual_label, 4, 0, Qt.AlignLeft)
         voice_params_layout.addWidget(self.bilingual_checkbox, 4, 1, Qt.AlignLeft)
+        # 将样式容器作为一行（默认隐藏）
+        voice_params_layout.addWidget(self.subtitle_style_container, 5, 0, 1, 2)
+        self.subtitle_style_container.setVisible(False)
+
+        # 绑定可见性联动
+        def _toggle():
+            show = self.subtitle_mode_combo.currentText() == "硬字幕（烧录到视频）"
+            self.subtitle_style_container.setVisible(show)
+        self.subtitle_mode_combo.currentTextChanged.connect(lambda _: _toggle())
+        _toggle()
+
+        # 将“字幕预览”按钮移动到上方样式区域，便于单独配置时每个文件独立预览
+        preview_btn = QPushButton("字幕预览")
+        preview_btn.setMaximumWidth(100)
+        preview_btn.clicked.connect(self.showSubtitlePreview)
+        voice_params_layout.addWidget(preview_btn, 6, 0, 1, 2, Qt.AlignLeft)
         
         # 配置操作按钮
         config_buttons_layout = QHBoxLayout()
@@ -1279,9 +1282,10 @@ class BatchProcessDialog(QDialog):
         config_buttons_layout.addStretch()
         
         # 字幕显示区域
-        subtitle_group = QGroupBox("字幕预览")
+        subtitle_group = QGroupBox("字幕展示")
         subtitle_layout = QVBoxLayout(subtitle_group)
         subtitle_layout.setSpacing(8)
+        subtitle_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         
         # 文件选择器
         subtitle_file_layout = QHBoxLayout()
@@ -1302,7 +1306,7 @@ class BatchProcessDialog(QDialog):
         
         # 字幕标签页
         self.subtitle_tabs = QTabWidget()
-        self.subtitle_tabs.setMaximumHeight(200)  # 限制高度
+        # 交由布局与分割器控制高度
         
         # 原始字幕页
         original_subtitle_widget = QWidget()
@@ -1363,6 +1367,10 @@ class BatchProcessDialog(QDialog):
         
         subtitle_buttons_layout.addWidget(self.clear_subtitles_btn)
         subtitle_buttons_layout.addWidget(self.export_subtitle_btn)
+        self.preview_style_btn = QPushButton("字幕预览")
+        self.preview_style_btn.setMaximumWidth(80)
+        self.preview_style_btn.clicked.connect(self.showSubtitlePreview)
+        subtitle_buttons_layout.addWidget(self.preview_style_btn)
         subtitle_buttons_layout.addStretch()
         
         subtitle_layout.addLayout(subtitle_file_layout)
@@ -1378,21 +1386,35 @@ class BatchProcessDialog(QDialog):
         config_container_layout.addWidget(conversion_group)
         config_container_layout.addWidget(voice_params_group)
         config_container_layout.addLayout(config_buttons_layout)
+        # 将字幕模块与其它配置保持左对齐一致
         config_container_layout.addWidget(subtitle_group)
         config_container_layout.addStretch()
         
         right_layout.addWidget(config_mode_group)
         right_layout.addWidget(self.config_container)
         
+        # 【优化】使用QScrollArea包裹左右面板，保证在小屏下可滚动
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setWidget(left_panel_widget)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setWidget(right_widget)
+
         # 【优化】将左右面板添加到 QSplitter 中
-        main_content_splitter.addWidget(left_panel_widget)
-        main_content_splitter.addWidget(right_widget)
+        main_content_splitter.addWidget(left_scroll)
+        main_content_splitter.addWidget(right_scroll)
         main_content_splitter.setStretchFactor(0, 1)  # 左侧初始比例为1
         main_content_splitter.setStretchFactor(1, 1)  # 右侧初始比例为1
         main_content_splitter.setCollapsible(0, False)  # 不允许左侧面板被完全折叠
         main_content_splitter.setCollapsible(1, False)  # 不允许右侧面板被完全折叠
         
         layout.addWidget(main_content_splitter)
+        # 仅保留内容区并占满空间
+        layout.setStretch(0, 1)
     
     def addFiles(self):
         """添加文件"""
@@ -1515,6 +1537,66 @@ class BatchProcessDialog(QDialog):
         self.updateFileCount()
         self.updateSubtitleFileList()  # 更新字幕文件列表
     
+    def showSubtitlePreview(self):
+        try:
+            from PyQt5.QtGui import QPainter, QColor, QFont, QPixmap
+            from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
+
+            w, h = 640, 360
+            pix = QPixmap(w, h)
+            pix.fill(QColor('#202020'))
+            painter = QPainter(pix)
+            family = self.subtitle_font_combo.currentFont().family() if hasattr(self, 'subtitle_font_combo') else 'Sans'
+            size = self.subtitle_font_size.value() if hasattr(self, 'subtitle_font_size') else 20
+            font = QFont(family, size)
+            painter.setFont(font)
+            fg = QColor(self.subtitle_font_color_btn.property('pickedColor') or '#FFFFFF') if hasattr(self, 'subtitle_font_color_btn') else QColor('#FFFFFF')
+            outline = QColor(self.subtitle_outline_color_btn.property('pickedColor') or '#000000') if hasattr(self, 'subtitle_outline_color_btn') else QColor('#000000')
+            text = "字幕预览 (Sample Preview)"
+            pos = self.subtitle_position_combo.currentText() if hasattr(self, 'subtitle_position_combo') else '底部居中'
+            metrics = painter.fontMetrics()
+            tw = metrics.width(text)
+            th = metrics.ascent()
+
+            def xy(position: str):
+                if position == '顶部居中':
+                    return ( (w - tw)//2, 10 + th)
+                if position == '中部居中':
+                    return ( (w - tw)//2, h//2 )
+                if position == '左下':
+                    return ( 10, h - 30 )
+                if position == '右下':
+                    return ( w - tw - 10, h - 30 )
+                if position == '左上':
+                    return ( 10, 10 + th )
+                if position == '右上':
+                    return ( w - tw - 10, 10 + th )
+                if position == '左中':
+                    return ( 10, h//2 )
+                if position == '右中':
+                    return ( w - tw - 10, h//2 )
+                return ( (w - tw)//2, h - 30 )
+
+            x, y = xy(pos)
+            painter.setPen(outline)
+            for dx in (-1, 1):
+                for dy in (-1, 1):
+                    painter.drawText(x+dx, y+dy, text)
+            painter.setPen(fg)
+            painter.drawText(x, y, text)
+            painter.end()
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle('字幕预览')
+            v = QVBoxLayout(dlg)
+            lab = QLabel()
+            lab.setPixmap(pix)
+            v.addWidget(lab)
+            dlg.resize(w, h)
+            dlg.exec_()
+        except Exception as e:
+            print(f"预览失败: {e}")
+
     def clearList(self):
         """清空文件列表"""
         if not self.file_list:
@@ -1618,7 +1700,15 @@ class BatchProcessDialog(QDialog):
                     'volume': volume,
                     'quality': quality,
                     'subtitle_mode': subtitle_mode,          # 新增：字幕嵌入模式
-                    'generate_bilingual': generate_bilingual # 新增：双语字幕选项
+                    'generate_bilingual': generate_bilingual, # 新增：双语字幕选项
+                    'subtitle_style': {
+                        'font_family': self.subtitle_font_combo.currentFont().family(),
+                        'font_size': self.subtitle_font_size.value(),
+                        'font_color': self.subtitle_font_color_btn.property('pickedColor') or '#FFFFFF',
+                        'outline_color': self.subtitle_outline_color_btn.property('pickedColor') or '#000000',
+                        'outline_width': self.subtitle_outline_width.value(),
+                        'position': self.subtitle_position_combo.currentText(),
+                    }
                 }
         
                 global_config = {

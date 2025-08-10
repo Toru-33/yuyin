@@ -16,7 +16,10 @@ import logging
 
 # 音频处理
 from pydub import AudioSegment
-from moviepy.editor import VideoFileClip
+try:
+    from moviepy.editor import VideoFileClip  # noqa: F401
+except Exception:
+    VideoFileClip = None
 
 # 本地AI模型
 try:

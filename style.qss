@@ -230,6 +230,24 @@ QPushButton:disabled {
     color: #adb5bd;
     border-color: transparent;
 }
+/* 强化关键按钮视觉 */
+QPushButton#primaryButton {
+  background: #10B981;
+  color: #F9FAFB;
+  border: 1px solid #0EA472;
+  font-weight: 600;
+}
+QPushButton#primaryButton:hover { background: #0EA472; }
+QPushButton#primaryButton:disabled { background: #A7F3D0; border-color: #99F6E4; color: #F9FAFB; }
+
+QPushButton#dangerButton {
+  background: #EF4444;
+  color: #F9FAFB;
+  border: 1px solid #DC2626;
+  font-weight: 600;
+}
+QPushButton#dangerButton:hover { background: #DC2626; }
+QPushButton#dangerButton:disabled { background: #FCA5A5; border-color: #FECACA; }
 
 /* 主操作按钮 */
 #processButton {
@@ -657,24 +675,9 @@ QCheckBox {
     color: #495057;
     font-weight: 500;
 }
-QCheckBox::indicator {
-    width: 1.2em;
-    height: 1.2em;
-    border: 2px solid #dee2e6;
-    border-radius: 0.4em;
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #ffffff, stop:1 #f8f9fa);
-}
-QCheckBox::indicator:checked {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #0078D7, stop:1 #005a9e);
-    border-color: #0078D7;
-}
-QCheckBox::indicator:hover {
-    border-color: #0078D7;
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #ffffff, stop:1 rgba(0, 120, 215, 0.1));
-}
+QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #CBD5E1; border-radius: 4px; background: #FFFFFF; }
+QCheckBox::indicator:checked { background: #10B981; border-color: #0EA472; }
+QCheckBox::indicator:hover { border-color: #94A3B8; background: #FFFFFF; }
 
 /* --- 工具提示样式 --- */
 QToolTip {
@@ -766,3 +769,36 @@ EnhancedSlider QLabel {
     border-radius: 0.3em;
     padding: 0.2em 0.4em;
 }
+
+/* --- Unified Neutral Modern Add-on --- */
+/* 替换部分蓝灰为中性现代风，尽量不破坏现有 ID/类选择器，可叠加覆盖 */
+QMainWindow, QDialog, QWidget {
+  background: #F8FAFC;
+  color: #111827;
+}
+QGroupBox {
+  background: #EEF2F7;
+  border: 1px solid #E5E7EB;
+  border-radius: 6px;
+  margin-top: 8px;
+  padding: 6px;
+}
+QGroupBox::title {
+  color: #334155;
+  font-weight: 600;
+}
+QPushButton {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #111827;
+}
+QPushButton:hover { background: #F1F5F9; }
+QPushButton:disabled { color: #9CA3AF; border-color: #E5E7EB; }
+QProgressBar { border: 1px solid #E5E7EB; background: #FFFFFF; }
+QProgressBar::chunk { background: #10B981; }
+QSplitter::handle { background: #E5E7EB; }
+QSplitter::handle:hover { background: #CBD5E1; }
+QTabBar::tab { background: #FFFFFF; border: 1px solid #E5E7EB; }
+QTabBar::tab:selected { color: #10B981; border-color: #10B981; }

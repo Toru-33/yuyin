@@ -24,9 +24,21 @@ import requests
 import random
 from hashlib import md5
 import re
-import audiotsm
+# 可选依赖：audiotsm（用于高质量变速）。若缺失，则在运行时降级。
+try:
+    import audiotsm  # noqa: F401
+    _HAS_AUDIOTSM = True
+except Exception:
+    audiotsm = None
+    _HAS_AUDIOTSM = False
 from pydub import AudioSegment
-from moviepy.editor import VideoFileClip
+# 可选依赖：moviepy（用于提取原音频）。若缺失，则在运行时降级为ffmpeg。
+try:
+    from moviepy.editor import VideoFileClip  # noqa: F401
+    _HAS_MOVIEPY = True
+except Exception:
+    VideoFileClip = None
+    _HAS_MOVIEPY = False
 import numpy as np
 from wsgiref.handlers import format_date_time
 from time import mktime
@@ -668,25 +680,43 @@ class UnifiedSpeechSynthesis:
                 if not os.path.exists(temp_wav_for_speed) or os.path.getsize(temp_wav_for_speed) == 0:
                     raise Exception("临时WAV文件创建失败")
                 
-                # 使用audiotsm进行高质量变速
+                # 使用audiotsm进行高质量变速（若可用），否则降级为 pydub+ffmpeg 的变速方案
                 try:
-                    import audiotsm.io.wav
-                    
-                    reader = audiotsm.io.wav.WavReader(temp_wav_for_speed)
-                    writer = audiotsm.io.wav.WavWriter(output_file, reader.channels, reader.samplerate)
-                    
-                    # 使用WSOLA算法保持音质
-                    wsola = audiotsm.wsola(reader.channels, speed=speed_rate)
-                    wsola.run(reader, writer)
-                    
-                    # 确保读写器正确关闭
-                    reader.close()
-                    writer.close()
-                    
-                    print(f"✅ 使用audiotsm调速成功")
+                    if _HAS_AUDIOTSM:
+                        import audiotsm.io.wav
+                        reader = audiotsm.io.wav.WavReader(temp_wav_for_speed)
+                        writer = audiotsm.io.wav.WavWriter(output_file, reader.channels, reader.samplerate)
+                        wsola = audiotsm.wsola(reader.channels, speed=speed_rate)
+                        wsola.run(reader, writer)
+                        reader.close()
+                        writer.close()
+                        print(f"✅ 使用audiotsm调速成功")
+                    else:
+                        # 降级：使用ffmpeg atempo（支持0.5~2.0，超出范围分段叠加）
+                        import math, subprocess
+                        tempo = 1.0 / speed_rate if speed_rate != 0 else 1.0
+                        def build_filters(t):
+                            # 将 t 分解为 0.5~2.0 范围的多个 atempo 级联
+                            filters = []
+                            if t <= 0:
+                                t = 1.0
+                            while t < 0.5:
+                                filters.append('atempo=0.5')
+                                t /= 0.5
+                            while t > 2.0:
+                                filters.append('atempo=2.0')
+                                t /= 2.0
+                            filters.append(f'atempo={t:.6f}')
+                            return filters
+                        atempo_filters = build_filters(tempo)
+                        cmd = ['ffmpeg', '-y', '-i', temp_wav_for_speed, '-filter:a', ','.join(atempo_filters), output_file]
+                        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+                        if result.returncode != 0:
+                            raise Exception(f"ffmpeg atempo 变速失败: {result.stderr}")
+                        print("✅ 使用ffmpeg atempo 调速成功（降级模式）")
                     
                 except Exception as audiotsm_exec_error:
-                    print(f"⚠️ audiotsm执行失败: {audiotsm_exec_error}")
+                    print(f"⚠️ 调速执行失败: {audiotsm_exec_error}")
                     raise audiotsm_exec_error
                     
             except Exception as audiotsm_error:

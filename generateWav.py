@@ -1,9 +1,6 @@
 import os
 import subprocess
 
-from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.editor import AudioFileClip
-
 def videoToWav(videoPath, savePath, output_filename=None):
     """从视频中提取音频并保存为WAV格式"""
     try:
@@ -24,40 +21,32 @@ def videoToWav(videoPath, savePath, output_filename=None):
             clean_name = re.sub(r'[^\w\-_]', '_', video_name)
             output_path = os.path.join(savePath, f'{clean_name}_extractedAudio.wav').replace('\\', '/')
         
-        # 使用VideoFileClip提取音频（更稳定）
-        with VideoFileClip(videoPath) as video:
-            if video.audio is None:
-                raise Exception("视频文件没有音频轨道")
-            
-            audio = video.audio
-            
-            # 检查音频对象是否有效
-            if audio is None:
-                raise Exception("无法从视频中提取音频对象")
-            
-            try:
-                # 写入音频文件
-                audio.write_audiofile(
-                    output_path, 
-                    verbose=False, 
-                    logger=None
-                )
-                
-            except Exception as write_error:
-                print(f"MoviePy写入失败: {write_error}")
-                
-                # 备用方案：使用ffmpeg直接提取，添加编码处理
-                cmd = ['ffmpeg', '-y', '-i', videoPath, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', output_path]
-                
+        # 使用VideoFileClip提取音频（更稳定），若不可用或失败则回退到ffmpeg
+        try:
+            from moviepy.video.io.VideoFileClip import VideoFileClip
+            with VideoFileClip(videoPath) as video:
+                if video.audio is None:
+                    raise Exception("视频文件没有音频轨道")
+                audio = video.audio
+                if audio is None:
+                    raise Exception("无法从视频中提取音频对象")
                 try:
-                    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
-                    if result.returncode != 0:
-                        raise Exception(f"ffmpeg提取音频失败: {result.stderr}")
-                except UnicodeDecodeError:
-                    # 如果编码失败，尝试不解码输出
-                    result = subprocess.run(cmd, capture_output=True, text=False)
-                    if result.returncode != 0:
-                        raise Exception(f"ffmpeg提取音频失败")
+                    audio.write_audiofile(output_path, verbose=False, logger=None)
+                except Exception as write_error:
+                    print(f"MoviePy写入失败: {write_error}")
+                    raise
+        except Exception as e:
+            # 备用方案：使用ffmpeg直接提取，添加编码处理
+            cmd = ['ffmpeg', '-y', '-i', videoPath, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', output_path]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+                if result.returncode != 0:
+                    raise Exception(f"ffmpeg提取音频失败: {result.stderr}")
+            except UnicodeDecodeError:
+                # 如果编码失败，尝试不解码输出
+                result = subprocess.run(cmd, capture_output=True, text=False)
+                if result.returncode != 0:
+                    raise Exception(f"ffmpeg提取音频失败")
         
         # 验证输出文件
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:

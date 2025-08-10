@@ -1820,7 +1820,8 @@ class ProcessThread(QThread):
                 converted_subtitle_file,
                 output_file,
                 conversion_type,
-                subtitle_mode
+                subtitle_mode,
+                style_options=self.voice_params.get('subtitle_style') if hasattr(self, 'voice_params') and self.voice_params else None
             )
             
             if result['success'] and os.path.exists(output_file):
@@ -1868,7 +1869,8 @@ class ProcessThread(QThread):
                 video_file,
                 subtitle_file,
                 output_file,
-                hard_subtitle=is_hard_subtitle
+                hard_subtitle=is_hard_subtitle,
+                style_options=self.voice_params.get('subtitle_style') if hasattr(self, 'voice_params') and self.voice_params else None
             )
             
             if success and os.path.exists(output_file):
@@ -2066,10 +2068,10 @@ class EnhancedMainWindow(QMainWindow):
             }
         """)
         
-        # 左侧控制区域
-        left_widget = QWidget()
-        left_widget.setMinimumWidth(450)  # 设置最小宽度确保控件显示完整
-        left_layout = QVBoxLayout(left_widget)
+        # 左侧控制区域（外层QScrollArea以适配小屏/半屏）
+        left_container = QWidget()
+        left_container.setMinimumWidth(450)
+        left_layout = QVBoxLayout(left_container)
         left_layout.setSpacing(6)  # 减小间距
         left_layout.setContentsMargins(6, 6, 6, 6)  # 减小边距
         
@@ -2080,16 +2082,27 @@ class EnhancedMainWindow(QMainWindow):
         left_layout.addWidget(self.createResultSection())
         left_layout.addStretch()  # 添加弹性空间
         
-        # 右侧字幕显示区域
-        right_widget = QWidget()
-        right_widget.setMinimumWidth(300)  # 设置最小宽度
-        right_layout = QVBoxLayout(right_widget)
+        # 右侧字幕显示区域（外层QScrollArea）
+        right_container = QWidget()
+        right_container.setMinimumWidth(300)
+        right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(8, 8, 8, 8)
         right_layout.addWidget(self.createSubtitleSection())
         
+        # 使用QScrollArea包裹左右区域，保证在小屏下可滚动
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setWidget(left_container)
+
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setWidget(right_container)
+
         # 将左右区域添加到分割器
-        self.content_splitter.addWidget(left_widget)
-        self.content_splitter.addWidget(right_widget)
+        self.content_splitter.addWidget(left_scroll)
+        self.content_splitter.addWidget(right_scroll)
         
         # 设置初始分割比例：左侧60%，右侧40%
         self.content_splitter.setSizes([600, 400])
@@ -2627,6 +2640,81 @@ class EnhancedMainWindow(QMainWindow):
         
         # 添加网格布局到主布局
         layout.addLayout(main_grid)
+
+        # 新增：字幕设置分组（是否嵌入、模式、样式、预览）
+        subtitle_group = QGroupBox("字幕设置")
+        sub_grid = QGridLayout(subtitle_group)
+        sub_grid.setContentsMargins(6, 6, 6, 6)
+        sub_grid.setSpacing(6)
+
+        # 是否嵌入
+        self.subtitle_embed_checkbox = QCheckBox("在转换后嵌入字幕")
+        self.subtitle_embed_checkbox.setChecked(True)
+        # 模式
+        self.subtitle_mode_combo_main = QComboBox()
+        self.subtitle_mode_combo_main.addItems(["软字幕（可选择）", "硬字幕（烧录到视频）", "不嵌入字幕"])  # 默认软字幕
+
+        # 字体与样式
+        self.subtitle_font_combo = QFontComboBox()
+        self.subtitle_font_size = QSpinBox()
+        self.subtitle_font_size.setRange(8, 96)
+        self.subtitle_font_size.setValue(20)
+
+        self.subtitle_font_color_btn = QPushButton("字体颜色")
+        self.subtitle_outline_color_btn = QPushButton("描边颜色")
+        self.subtitle_outline_width = QSpinBox()
+        self.subtitle_outline_width.setRange(0, 10)
+        self.subtitle_outline_width.setValue(1)
+
+        self.subtitle_position_combo = QComboBox()
+        self.subtitle_position_combo.addItems(["底部居中","顶部居中","中部居中","左下","右下","左上","右上","左中","右中"]) 
+
+        def pick_color(btn):
+            color = QColorDialog.getColor(Qt.white, self, "选择颜色")
+            if color.isValid():
+                qss = f"background-color: {color.name()};"
+                btn.setStyleSheet(qss)
+                btn.setProperty('pickedColor', color.name())
+
+        self.subtitle_font_color_btn.clicked.connect(lambda: pick_color(self.subtitle_font_color_btn))
+        self.subtitle_outline_color_btn.clicked.connect(lambda: pick_color(self.subtitle_outline_color_btn))
+
+        preview_btn = QPushButton("预览字幕效果")
+        preview_btn.clicked.connect(self.showSubtitlePreview)
+
+        # 摆放
+        row = 0
+        sub_grid.addWidget(self.subtitle_embed_checkbox, row, 0, 1, 2)
+        sub_grid.addWidget(QLabel("嵌入模式:"), row, 2)
+        sub_grid.addWidget(self.subtitle_mode_combo_main, row, 3)
+        row += 1
+        # 将样式控件放入独立容器，按需显示
+        self.subtitle_style_container = QWidget()
+        style_layout = QGridLayout(self.subtitle_style_container)
+        style_layout.setContentsMargins(0, 0, 0, 0)
+        style_layout.setSpacing(6)
+        style_row = 0
+        style_layout.addWidget(QLabel("字体:"), style_row, 0)
+        style_layout.addWidget(self.subtitle_font_combo, style_row, 1)
+        style_layout.addWidget(QLabel("字号:"), style_row, 2)
+        style_layout.addWidget(self.subtitle_font_size, style_row, 3)
+        style_row += 1
+        style_layout.addWidget(QLabel("颜色:"), style_row, 0)
+        style_layout.addWidget(self.subtitle_font_color_btn, style_row, 1)
+        style_layout.addWidget(QLabel("描边颜色:"), style_row, 2)
+        style_layout.addWidget(self.subtitle_outline_color_btn, style_row, 3)
+        style_row += 1
+        style_layout.addWidget(QLabel("描边宽度:"), style_row, 0)
+        style_layout.addWidget(self.subtitle_outline_width, style_row, 1)
+        style_layout.addWidget(QLabel("位置:"), style_row, 2)
+        style_layout.addWidget(self.subtitle_position_combo, style_row, 3)
+        style_row += 1
+        style_layout.addWidget(preview_btn, style_row, 0, 1, 4)
+
+        sub_grid.addWidget(self.subtitle_style_container, row, 0, 1, 4)
+        self.subtitle_style_container.setVisible(False)
+
+        layout.addWidget(subtitle_group)
         layout.addStretch()  # 添加弹性空间
         
         # 连接转换类型变化信号
@@ -2635,8 +2723,93 @@ class EnhancedMainWindow(QMainWindow):
         # 连接滑块信号
         self.speed_slider.valueChanged.connect(self.onSpeedChanged)
         self.volume_slider.valueChanged.connect(self.onVolumeChanged)
-        
+
+        # 按需显示字幕控件
+        def _on_embed_changed():
+            self._toggleSubtitleControls()
+        def _on_mode_changed():
+            self._toggleSubtitleControls()
+        self.subtitle_embed_checkbox.stateChanged.connect(_on_embed_changed)
+        self.subtitle_mode_combo_main.currentTextChanged.connect(_on_mode_changed)
+        self._toggleSubtitleControls()
+
         return group
+
+    def showSubtitlePreview(self):
+        try:
+            from PyQt5.QtGui import QPainter, QColor, QFont, QPixmap
+            from PyQt5.QtWidgets import QDialog, QLabel, QVBoxLayout
+
+            w, h = 640, 360
+            pix = QPixmap(w, h)
+            pix.fill(QColor('#202020'))
+            painter = QPainter(pix)
+            # 字体
+            family = self.subtitle_font_combo.currentFont().family() if hasattr(self, 'subtitle_font_combo') else 'Sans'
+            size = self.subtitle_font_size.value() if hasattr(self, 'subtitle_font_size') else 20
+            font = QFont(family, size)
+            painter.setFont(font)
+            # 颜色与描边
+            fg = QColor(self.subtitle_font_color_btn.property('pickedColor') or '#FFFFFF') if hasattr(self, 'subtitle_font_color_btn') else QColor('#FFFFFF')
+            outline = QColor(self.subtitle_outline_color_btn.property('pickedColor') or '#000000') if hasattr(self, 'subtitle_outline_color_btn') else QColor('#000000')
+            text = "字幕预览 (Sample Preview)"
+
+            # 位置
+            pos = self.subtitle_position_combo.currentText() if hasattr(self, 'subtitle_position_combo') else '底部居中'
+            metrics = painter.fontMetrics()
+            tw = metrics.width(text)
+            th = metrics.ascent()
+
+            def xy(position: str):
+                if position == '顶部居中':
+                    return ( (w - tw)//2, 10 + th)
+                if position == '中部居中':
+                    return ( (w - tw)//2, h//2 )
+                if position == '左下':
+                    return ( 10, h - 30 )
+                if position == '右下':
+                    return ( w - tw - 10, h - 30 )
+                if position == '左上':
+                    return ( 10, 10 + th )
+                if position == '右上':
+                    return ( w - tw - 10, 10 + th )
+                if position == '左中':
+                    return ( 10, h//2 )
+                if position == '右中':
+                    return ( w - tw - 10, h//2 )
+                return ( (w - tw)//2, h - 30 )
+
+            x, y = xy(pos)
+            # 简单描边
+            painter.setPen(outline)
+            for dx in (-1, 1):
+                for dy in (-1, 1):
+                    painter.drawText(x+dx, y+dy, text)
+            painter.setPen(fg)
+            painter.drawText(x, y, text)
+            painter.end()
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle('字幕预览')
+            v = QVBoxLayout(dlg)
+            lab = QLabel()
+            lab.setPixmap(pix)
+            v.addWidget(lab)
+            dlg.resize(w, h)
+            dlg.exec_()
+        except Exception as e:
+            print(f"预览失败: {e}")
+
+    def _toggleSubtitleControls(self):
+        try:
+            embed = self.subtitle_embed_checkbox.isChecked() if hasattr(self, 'subtitle_embed_checkbox') else False
+            if hasattr(self, 'subtitle_mode_combo_main'):
+                self.subtitle_mode_combo_main.setVisible(embed)
+            show_style = embed and (self.subtitle_mode_combo_main.currentText() == '硬字幕（烧录到视频）') if hasattr(self, 'subtitle_mode_combo_main') else False
+            if hasattr(self, 'subtitle_style_container'):
+                self.subtitle_style_container.setVisible(show_style)
+        except Exception as e:
+            print(f"切换字幕控件可见性失败: {e}")
 
     def updateVoiceSelection(self):
         """根据转换类型更新发音人控件的显示"""
@@ -3011,7 +3184,7 @@ class EnhancedMainWindow(QMainWindow):
     
     def createSubtitleSection(self):
         """创建字幕显示区域 - 精简图标使用"""
-        group = QGroupBox("字幕预览与编辑")
+        group = QGroupBox("字幕展示与编辑")
         group.setObjectName("subtitleSection")
         layout = QVBoxLayout(group)
         layout.setSpacing(8)
@@ -3688,14 +3861,21 @@ class EnhancedMainWindow(QMainWindow):
         conversion_type = self.conversion_combo.currentText()
         
         # 收集语音参数 - 适配新的滑块组件
-        # 从设置中读取字幕模式
-        try:
-            import json
-            with open('config.json', 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            subtitle_mode = config.get('subtitle_mode', '硬字幕（烧录到视频）')
-        except:
-            subtitle_mode = '硬字幕（烧录到视频）'
+        # 从界面读取字幕嵌入与样式（覆盖config.json）
+        if hasattr(self, 'subtitle_embed_checkbox'):
+            if not self.subtitle_embed_checkbox.isChecked():
+                subtitle_mode = '不嵌入字幕'
+            else:
+                subtitle_mode = self.subtitle_mode_combo_main.currentText()
+        else:
+            # 兼容旧配置
+            try:
+                import json
+                with open('config.json', 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                subtitle_mode = config.get('subtitle_mode', '硬字幕（烧录到视频）')
+            except:
+                subtitle_mode = '硬字幕（烧录到视频）'
             
         # 根据转换类型选择对应的发音人
         if conversion_type in ["英文转英文", "中文转英文"]:
@@ -3714,6 +3894,18 @@ class EnhancedMainWindow(QMainWindow):
             'quality': self.quality_combo.currentText(),
             'subtitle_mode': subtitle_mode
         }
+
+        # 字幕样式参数（仅在界面存在时添加）
+        if hasattr(self, 'subtitle_font_combo'):
+            style_opts = {
+                'font_family': self.subtitle_font_combo.currentFont().family(),
+                'font_size': self.subtitle_font_size.value(),
+                'font_color': self.subtitle_font_color_btn.property('pickedColor') or '#FFFFFF',
+                'outline_color': self.subtitle_outline_color_btn.property('pickedColor') or '#000000',
+                'outline_width': self.subtitle_outline_width.value(),
+                'position': self.subtitle_position_combo.currentText(),
+            }
+            voice_params['subtitle_style'] = style_opts
         
         # 添加翻译配置
         try:

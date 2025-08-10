@@ -1,4 +1,7 @@
-from moviepy.editor import *
+try:
+    from moviepy.editor import *  # noqa
+except Exception:
+    pass
 import os
 from pydub import AudioSegment
 from pydub.utils import make_chunks
